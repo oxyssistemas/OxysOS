@@ -1,0 +1,19 @@
+{
+  "name": "@oxys/shared",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "exports": {
+    "./supabase": "./src/lib/supabaseClient.ts",
+    "./masks": "./src/lib/masks.ts",
+    "./components/*": "./src/components/*.tsx",
+    "./index.css": "./src/index.css"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.4",
+    "lucide-react": "^0.441.0"
+  },
+  "peerDependencies": {
+    "react": "^18.3.1"
+  }
+}
