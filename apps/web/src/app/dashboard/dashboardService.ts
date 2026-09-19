@@ -1,8 +1,10 @@
 import { supabase } from "@oxys/shared/supabase";
 import { fusoDoNavegador, type Periodo } from "./periodo";
+import type { NivelPrioridade } from "../configuracoes/tipos";
 
 export interface CardsDashboard {
   os_abertas: number | null;
+  os_agendadas: number | null;
   os_em_andamento: number | null;
   os_pausadas: number | null;
   os_criadas_periodo: number | null;
@@ -11,6 +13,7 @@ export interface CardsDashboard {
   clientes_novos_periodo: number | null;
   /** null = ainda sem fonte de dados (não exibir) */
   os_atrasadas: number | null;
+  os_vencendo: number | null;
   tecnicos_ativos: number | null;
   equipamentos: number | null;
   faturamento_periodo: number | null;
@@ -24,6 +27,14 @@ export interface OsPorStatus {
   total: number;
 }
 
+export interface OsPorPrioridade {
+  id: string;
+  nome: string;
+  cor: string;
+  nivel: NivelPrioridade;
+  total: number;
+}
+
 export interface OsPorPeriodo {
   /** AAAA-MM-DD (dia ou primeiro dia do mês) */
   inicio: string;
@@ -31,7 +42,7 @@ export interface OsPorPeriodo {
   finalizadas: number;
 }
 
-export interface OsPorResponsavel {
+export interface OsPorTecnico {
   id: string | null;
   nome: string;
   total: number;
@@ -42,8 +53,8 @@ export interface ResumoDashboard {
   cards: CardsDashboard;
   os_por_status: OsPorStatus[] | null;
   os_por_periodo: OsPorPeriodo[] | null;
-  os_por_responsavel: OsPorResponsavel[] | null;
-  os_por_prioridade: null;
+  os_por_tecnico: OsPorTecnico[] | null;
+  os_por_prioridade: OsPorPrioridade[] | null;
 }
 
 export type AcaoAtividade =
@@ -51,19 +62,48 @@ export type AcaoAtividade =
   | "os_status_alterado"
   | "os_reparo_iniciado"
   | "os_concluida"
+  | "os_local_alterado"
+  | "os_prioridade_alterada"
+  | "os_tipo_servico_alterado"
+  | "os_atualizada"
+  | "os_tecnico_atribuido"
+  | "os_tecnico_removido"
+  | "os_item_adicionado"
+  | "os_item_alterado"
+  | "os_item_removido"
+  | "os_anexo_adicionado"
+  | "os_anexo_removido"
+  | "os_checklist_aplicado"
+  | "os_checklist_concluido"
+  | "os_checklist_removido"
   | "cliente_cadastrado"
-  | "funcionario_criado";
+  | "tecnico_cadastrado"
+  | "equipamento_cadastrado"
+  | "funcionario_criado"
+  | "funcionario_atualizado"
+  | "funcionario_cargo_alterado"
+  | "funcionario_desativado"
+  | "funcionario_reativado";
 
 export interface ItemAtividade {
   id: string;
   acao: AcaoAtividade | string;
   criado_em: string;
   usuario: string | null;
-  os: { id: string; cliente: string | null } | null;
+  os: { id: string; numero: string | null; cliente: string | null } | null;
   status_novo: string | null;
   cliente: string | null;
   cliente_id: string | null;
+  tecnico: string | null;
+  equipamento: string | null;
+  equipamento_id: string | null;
   funcionario: string | null;
+  /** descrição do item em eventos de itens da OS */
+  item: string | null;
+  /** nome do arquivo em eventos de anexos da OS */
+  arquivo: string | null;
+  /** nome do checklist em eventos de checklist da OS */
+  checklist: string | null;
 }
 
 function erroAmigavel(contexto: string, error: unknown): Error {

@@ -6,6 +6,11 @@
   box-sizing: border-box;
 }
 
+:root {
+  /* app todo em tema escuro: controles nativos (datas, rolagem) acompanham */
+  color-scheme: dark;
+}
+
 html,
 body,
 #root {

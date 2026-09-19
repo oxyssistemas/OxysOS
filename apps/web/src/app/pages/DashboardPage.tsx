@@ -138,7 +138,7 @@ export function DashboardPage() {
   const totalCriadasPeriodo = serie?.reduce((s, p) => s + p.criadas, 0) ?? 0;
   const totalFinalizadasPeriodo = serie?.reduce((s, p) => s + p.finalizadas, 0) ?? 0;
   const semOsAtivas =
-    cards && cards.os_abertas === 0 && cards.os_em_andamento === 0 && cards.os_pausadas === 0 && totalCriadasPeriodo === 0;
+    cards && cards.os_abertas === 0 && !cards.os_agendadas && cards.os_em_andamento === 0 && cards.os_pausadas === 0 && totalCriadasPeriodo === 0;
 
   const rotulosSerie = (serie ?? []).map((p) =>
     periodo.preset === "hoje" ? "Hoje" : porMes ? formatoMes.format(dataLocal(p.inicio)) : formatoDia.format(dataLocal(p.inicio)),
@@ -222,6 +222,9 @@ export function DashboardPage() {
           {cards && (
             <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
               {cards.os_abertas !== null && <CartaoIndicador rotulo="OS abertas" valor={cards.os_abertas} detalhe="no momento" />}
+              {cards.os_agendadas !== null && (
+                <CartaoIndicador rotulo="OS agendadas" valor={cards.os_agendadas} detalhe="no momento" />
+              )}
               {cards.os_em_andamento !== null && (
                 <CartaoIndicador
                   rotulo="OS em andamento"
@@ -229,7 +232,13 @@ export function DashboardPage() {
                   detalhe={cards.os_pausadas ? `${formatoNumero.format(cards.os_pausadas)} pausadas` : "no momento"}
                 />
               )}
-              {cards.os_atrasadas !== null && <CartaoIndicador rotulo="OS atrasadas" valor={cards.os_atrasadas} />}
+              {cards.os_atrasadas !== null && (
+                <CartaoIndicador
+                  rotulo="OS atrasadas"
+                  valor={cards.os_atrasadas}
+                  detalhe={cards.os_vencendo ? `${formatoNumero.format(cards.os_vencendo)} vencem em breve` : "fora do prazo"}
+                />
+              )}
               {cards.os_criadas_periodo !== null && (
                 <CartaoIndicador rotulo="OS criadas" valor={cards.os_criadas_periodo} detalhe="no período" />
               )}
@@ -301,31 +310,37 @@ export function DashboardPage() {
           )}
 
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-            {resumo.os_por_responsavel && (
+            {resumo.os_por_tecnico && (
               <CartaoGrafico
-                titulo="OS por responsável"
+                titulo="OS por técnico"
                 descricao="OS criadas no período"
-                vazio={resumo.os_por_responsavel.length === 0}
+                vazio={resumo.os_por_tecnico.length === 0}
                 mensagemVazio="Nenhuma OS criada no período."
                 tabela={
-                  <TabelaDados colunas={["Responsável", "OS"]} linhas={resumo.os_por_responsavel.map((r) => [r.nome, r.total])} />
+                  <TabelaDados colunas={["Técnico", "OS"]} linhas={resumo.os_por_tecnico.map((r) => [r.nome, r.total])} />
                 }
               >
                 <BarrasHorizontais
                   unidade={{ singular: "OS", plural: "OS" }}
-                  itens={resumo.os_por_responsavel.map((r) => ({ id: r.id ?? "sem-responsavel", rotulo: r.nome, valor: r.total }))}
+                  itens={resumo.os_por_tecnico.map((r) => ({ id: r.id ?? "sem-tecnico", rotulo: r.nome, valor: r.total }))}
                 />
               </CartaoGrafico>
             )}
 
-            {serie && (
+            {resumo.os_por_prioridade && (
               <CartaoGrafico
                 titulo="OS por prioridade"
-                className="lg:self-start"
-                vazio
-                mensagemVazio="As ordens de serviço ainda não registram prioridade. O gráfico será exibido quando as OS passarem a ter esse campo."
+                descricao="OS criadas no período"
+                vazio={resumo.os_por_prioridade.every((p) => p.total === 0)}
+                mensagemVazio="Nenhuma OS criada no período."
+                tabela={
+                  <TabelaDados colunas={["Prioridade", "OS"]} linhas={resumo.os_por_prioridade.map((p) => [p.nome, p.total])} />
+                }
               >
-                {null}
+                <BarrasHorizontais
+                  unidade={{ singular: "OS", plural: "OS" }}
+                  itens={resumo.os_por_prioridade.map((p) => ({ id: p.id, rotulo: p.nome, valor: p.total, marcador: p.cor }))}
+                />
               </CartaoGrafico>
             )}
 
@@ -333,7 +348,7 @@ export function DashboardPage() {
               titulo="Atividade recente"
               vazio={atividade !== null && atividade.length === 0}
               mensagemVazio="Nenhuma atividade registrada ainda."
-              className={resumo.os_por_responsavel ? "" : "lg:col-span-3"}
+              className={resumo.os_por_tecnico ? "" : "lg:col-span-3"}
             >
               {atividade === null ? (
                 <div className="flex flex-col gap-3" aria-hidden="true">

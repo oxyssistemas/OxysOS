@@ -38,9 +38,10 @@ begin
     (v_owner_b, v_loja_b, 'Owner B', 'owner-b@teste.invalid', 'gerente'),
     (v_func_a,  v_loja_a, 'Func A',  'func-a@teste.invalid',  'funcionario');
 
-  insert into public.status_os (loja_id, nome, categoria, ordem) values (v_loja_a, 'Aberta', 'aberto', 1) returning id into v_aberto_a;
-  insert into public.status_os (loja_id, nome, categoria, ordem) values (v_loja_a, 'Concluída', 'finalizado_sucesso', 2) returning id into v_final_a;
-  insert into public.status_os (loja_id, nome, categoria, ordem) values (v_loja_b, 'Aberta', 'aberto', 1) returning id into v_aberto_b;
+  -- workflow padrão criado junto com a empresa
+  select id into v_aberto_a from public.status_os where loja_id = v_loja_a and chave = 'nova';
+  select id into v_final_a from public.status_os where loja_id = v_loja_a and chave = 'finalizada';
+  select id into v_aberto_b from public.status_os where loja_id = v_loja_b and chave = 'nova';
 
   insert into public.clientes (loja_id, nome) values (v_loja_a, 'Cliente A1') returning id into v_cli_a1;
   insert into public.clientes (loja_id, nome) values (v_loja_a, 'Cliente A2') returning id into v_cli_a2;
@@ -48,7 +49,8 @@ begin
 
   -- A: 3 OS (2 abertas, 1 finalizada hoje), responsável = owner A em duas
   insert into public.ordens_servico (loja_id, cliente_id, status_id, responsavel_id, descricao)
-    values (v_loja_a, v_cli_a1, v_final_a, v_owner_a, 'OS A1') returning id into v_os_a1;
+    values (v_loja_a, v_cli_a1, v_aberto_a, v_owner_a, 'OS A1') returning id into v_os_a1;
+  update public.ordens_servico set status_id = v_final_a where id = v_os_a1;
   insert into public.ordens_servico (loja_id, cliente_id, status_id, responsavel_id, descricao)
     values (v_loja_a, v_cli_a1, v_aberto_a, v_owner_a, 'OS A2');
   insert into public.ordens_servico (loja_id, cliente_id, status_id, descricao)
@@ -78,10 +80,11 @@ begin
     v_ok := v_ok + 1; v_log := v_log || E'\n  ok   cards da empresa A corretos (2 abertas, 3 criadas, 1 finalizada, 2 clientes)';
   else v_falhas := v_falhas + 1; v_log := v_log || format(E'\n  FALHA cards A: %s', v_json->'cards'); end if;
 
-  if v_json->'cards'->'tecnicos_ativos' = 'null'::jsonb and v_json->'cards'->'faturamento_periodo' = 'null'::jsonb
-     and v_json->'os_por_prioridade' = 'null'::jsonb then
-    v_ok := v_ok + 1; v_log := v_log || E'\n  ok   métricas sem fonte real voltam null (sem número inventado)';
-  else v_falhas := v_falhas + 1; v_log := v_log || E'\n  FALHA métricas sem fonte'; end if;
+  if (v_json->'cards'->>'tecnicos_ativos')::int = 0 and v_json->'cards'->'faturamento_periodo' = 'null'::jsonb
+     and v_json->'os_por_prioridade' @> jsonb_build_array(jsonb_build_object('nome', 'Normal', 'total', 3))
+     and (select sum((x->>'total')::int) from jsonb_array_elements(v_json->'os_por_prioridade') x) = 3 then
+    v_ok := v_ok + 1; v_log := v_log || E'\n  ok   técnicos ativos e OS por prioridade com fonte real; métricas sem fonte seguem null';
+  else v_falhas := v_falhas + 1; v_log := v_log || format(E'\n  FALHA métricas: %s', v_json->'cards'); end if;
 
   select sum((x->>'criadas')::int), count(*) into v_n, v_txt from jsonb_array_elements(v_json->'os_por_periodo') x;
   if v_n = 3 and v_txt = '7' then
@@ -89,14 +92,15 @@ begin
   else v_falhas := v_falhas + 1; v_log := v_log || format(E'\n  FALHA série: soma %s, dias %s', v_n, v_txt); end if;
 
   select sum((x->>'total')::int) into v_n from jsonb_array_elements(v_json->'os_por_status') x;
-  if v_n = 3 and jsonb_array_length(v_json->'os_por_status') = 2 then
+  if v_n = 3 and jsonb_array_length(v_json->'os_por_status') = (select count(*) from public.status_os where loja_id = v_loja_a and ativo)
+     and not exists (select 1 from jsonb_array_elements(v_json->'os_por_status') x
+                     where (x->>'id')::uuid in (select id from public.status_os where loja_id = v_loja_b)) then
     v_ok := v_ok + 1; v_log := v_log || E'\n  ok   OS por status: só status da empresa A, soma = 3';
   else v_falhas := v_falhas + 1; v_log := v_log || format(E'\n  FALHA por status: %s', v_json->'os_por_status'); end if;
 
-  if v_json->'os_por_responsavel' @> jsonb_build_array(jsonb_build_object('nome', 'Owner A', 'total', 2))
-     and v_json->'os_por_responsavel' @> jsonb_build_array(jsonb_build_object('nome', 'Sem responsável', 'total', 1)) then
-    v_ok := v_ok + 1; v_log := v_log || E'\n  ok   OS por responsável (Owner A: 2, Sem responsável: 1)';
-  else v_falhas := v_falhas + 1; v_log := v_log || format(E'\n  FALHA por responsável: %s', v_json->'os_por_responsavel'); end if;
+  if v_json->'os_por_tecnico' = jsonb_build_array(jsonb_build_object('id', null, 'nome', 'Sem técnico', 'total', 3)) then
+    v_ok := v_ok + 1; v_log := v_log || E'\n  ok   OS por técnico (3 sem técnico atribuído)';
+  else v_falhas := v_falhas + 1; v_log := v_log || format(E'\n  FALHA por técnico: %s', v_json->'os_por_tecnico'); end if;
 
   execute 'set local role authenticated';
   v_json := public.dashboard_atividade(50);
@@ -150,8 +154,8 @@ begin
   v_json := public.dashboard_resumo(v_inicio, v_fim);
   execute 'reset role';
   if v_json->'os_por_status' = 'null'::jsonb and v_json->'cards'->'os_abertas' = 'null'::jsonb
-     and v_json->'cards'->'clientes_total' = 'null'::jsonb then
-    v_ok := v_ok + 1; v_log := v_log || E'\n  ok   cargo Estoque: seções de OS e clientes ocultas no servidor';
+     and v_json->'cards'->'clientes_total' = 'null'::jsonb and v_json->'cards'->'tecnicos_ativos' = 'null'::jsonb then
+    v_ok := v_ok + 1; v_log := v_log || E'\n  ok   cargo Estoque: seções de OS, clientes e técnicos ocultas no servidor';
   else v_falhas := v_falhas + 1; v_log := v_log || format(E'\n  FALHA cargo Estoque vê: %s', v_json); end if;
 
   execute 'set local role authenticated';

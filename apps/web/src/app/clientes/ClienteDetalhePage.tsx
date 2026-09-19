@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import {
   AlertTriangle,
@@ -38,6 +38,8 @@ import { formatarEnderecoLinha, type Cliente, type EnderecoCliente } from "./tip
 import { ClienteFormPanel } from "./components/ClienteFormPanel";
 import { EnderecoFormPanel } from "./components/EnderecoFormPanel";
 import { StatusCliente, TipoClienteBadge } from "./components/StatusCliente";
+import { EquipamentoFormPanel } from "../equipamentos/components/EquipamentoFormPanel";
+import { EquipamentosDoCliente } from "../equipamentos/components/EquipamentosDoCliente";
 
 type Aba = "visao-geral" | "equipamentos" | "ordens" | "arquivos" | "historico";
 
@@ -78,6 +80,24 @@ function descreverEvento(e: EventoHistoricoCliente): string {
       return `${quem} abriu uma ordem de serviço`;
     case "os_status_alterado":
       return `${quem} alterou uma OS${e.status_novo ? ` para ${e.status_novo}` : ""}`;
+    case "os_local_alterado":
+      return `${quem} alterou o local de atendimento de uma OS`;
+    case "os_prioridade_alterada":
+      return `${quem} alterou a prioridade de uma OS`;
+    case "os_tipo_servico_alterado":
+      return `${quem} alterou o tipo de serviço de uma OS`;
+    case "os_atualizada":
+      return `${quem} editou uma OS`;
+    case "os_tecnico_atribuido":
+      return `${quem} atribuiu um técnico a uma OS`;
+    case "os_tecnico_removido":
+      return `${quem} removeu o técnico de uma OS`;
+    case "os_item_adicionado":
+      return `${quem} adicionou um item a uma OS`;
+    case "os_item_alterado":
+      return `${quem} alterou um item de uma OS`;
+    case "os_item_removido":
+      return `${quem} removeu um item de uma OS`;
     case "os_reparo_iniciado":
       return `${quem} iniciou o atendimento de uma OS`;
     case "os_concluida":
@@ -126,9 +146,16 @@ export function ClienteDetalhePage() {
 
   const [ordens, setOrdens] = useState<{ ordens: OsDoCliente[]; total: number } | null>(null);
   const [historico, setHistorico] = useState<EventoHistoricoCliente[] | null>(null);
+  const [novoEquipamento, setNovoEquipamento] = useState(false);
+  const [versaoEquipamentos, setVersaoEquipamentos] = useState(0);
+  // referência estável: o formulário recarrega quando esta prop muda
+  const clienteInicialEquipamento = useMemo(
+    () => (cliente ? { id: cliente.id, nome: cliente.nome } : null),
+    [cliente?.id, cliente?.nome],
+  );
 
   const verOs = hasFeature("service_orders") && can("service_orders.view");
-  const verEquipamentos = hasFeature("assets");
+  const verEquipamentos = hasFeature("assets") && can("assets.view");
 
   const abasDisponiveis: { id: Aba; label: string }[] = [
     { id: "visao-geral", label: "Visão geral" },
@@ -309,14 +336,12 @@ export function ClienteDetalhePage() {
                 <ClipboardPlus size={16} aria-hidden="true" /> Nova OS
               </Link>
             )}
-            {!arquivado && verEquipamentos && can("assets.create") && (
+            {!arquivado && hasFeature("assets") && can("assets.create") && (
               <button
-                disabled
-                title="Disponível quando o módulo de equipamentos for ativado"
-                className="flex cursor-not-allowed items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium text-text-muted"
+                onClick={() => setNovoEquipamento(true)}
+                className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium text-text-secondary hover:bg-white/5 hover:text-text-primary"
               >
                 <HardDrive size={16} aria-hidden="true" /> Adicionar equipamento
-                <span className="sr-only">(em breve)</span>
               </button>
             )}
             {can("customers.archive") && (
@@ -481,9 +506,11 @@ export function ClienteDetalhePage() {
         )}
 
         {aba === "equipamentos" && (
-          <EmBreve
-            titulo="Equipamentos do cliente"
-            descricao="Os equipamentos vinculados a este cliente aparecerão aqui quando o módulo de equipamentos for ativado."
+          <EquipamentosDoCliente
+            clienteId={cliente.id}
+            versao={versaoEquipamentos}
+            podeCadastrar={!arquivado && can("assets.create")}
+            onCadastrar={() => setNovoEquipamento(true)}
           />
         )}
 
@@ -511,20 +538,25 @@ export function ClienteDetalhePage() {
               <>
                 <ul className="divide-y divide-border">
                   {ordens.ordens.map((os) => (
-                    <li key={os.id} className="flex flex-col gap-1 px-5 py-3.5 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm text-text-primary">{os.objeto_atendimento || os.descricao}</p>
-                        <p className="text-xs text-text-muted">
-                          {formatoDataHora.format(new Date(os.criado_em))}
-                          {os.codigo_aparelho && ` · Código ${os.codigo_aparelho}`}
-                        </p>
-                      </div>
-                      {os.status && (
-                        <span className="inline-flex shrink-0 items-center gap-1.5 self-start rounded-full border border-border px-2 py-0.5 text-xs text-text-secondary sm:self-auto">
-                          <span className="h-2 w-2 rounded-full" style={{ backgroundColor: os.status.cor ?? "#6B6B6B" }} aria-hidden="true" />
-                          {os.status.nome}
-                        </span>
-                      )}
+                    <li key={os.id}>
+                      <Link
+                        to={`/app/service-orders/${os.id}`}
+                        className="flex flex-col gap-1 px-5 py-3.5 hover:bg-white/[0.03] sm:flex-row sm:items-center sm:justify-between"
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate text-sm text-text-primary">
+                            <span className="mr-2 font-mono text-xs text-accent">{os.numero}</span>
+                            {os.titulo || os.objeto_atendimento || os.descricao}
+                          </p>
+                          <p className="text-xs text-text-muted">{formatoDataHora.format(new Date(os.criado_em))}</p>
+                        </div>
+                        {os.status && (
+                          <span className="inline-flex shrink-0 items-center gap-1.5 self-start rounded-full border border-border px-2 py-0.5 text-xs text-text-secondary sm:self-auto">
+                            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: os.status.cor ?? "#6B6B6B" }} aria-hidden="true" />
+                            {os.status.nome}
+                          </span>
+                        )}
+                      </Link>
                     </li>
                   ))}
                 </ul>
@@ -534,7 +566,7 @@ export function ClienteDetalhePage() {
                       ? `Mostrando as ${ordens.ordens.length} mais recentes de ${ordens.total}`
                       : `${ordens.total} ${ordens.total === 1 ? "ordem" : "ordens"}`}
                   </span>
-                  <Link to="/app/service-orders" className="font-medium text-accent hover:text-accent-hover">
+                  <Link to={`/app/service-orders?cliente=${cliente.id}&grupo=todas`} className="font-medium text-accent hover:text-accent-hover">
                     Ver todas as OS
                   </Link>
                 </div>
@@ -591,6 +623,20 @@ export function ClienteDetalhePage() {
           carregarCliente();
         }}
       />
+
+      {hasFeature("assets") && can("assets.create") && (
+        <EquipamentoFormPanel
+          aberto={novoEquipamento}
+          equipamentoId={null}
+          clienteInicial={clienteInicialEquipamento}
+          onFechar={() => setNovoEquipamento(false)}
+          onSalvo={() => {
+            setNovoEquipamento(false);
+            setVersaoEquipamentos((v) => v + 1);
+            trocarAba("equipamentos");
+          }}
+        />
+      )}
 
       {company && (
         <EnderecoFormPanel

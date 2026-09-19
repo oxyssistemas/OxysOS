@@ -1,6 +1,7 @@
 import type { PostgrestError } from "@supabase/supabase-js";
 import { supabase } from "@oxys/shared/supabase";
 import { limparDocumento, normalizarBusca } from "@oxys/shared/masks";
+import { erroAmigavel } from "@/lib/erros";
 import type {
   Cliente,
   ClienteListagem,
@@ -35,20 +36,8 @@ const MENSAGENS_RESTRICAO: Record<string, string> = {
   cliente_enderecos_cidade: "Informe a cidade.",
 };
 
-/** Converte erros do banco em mensagens para o usuário; detalhes técnicos só no console. */
-function erroAmigavel(error: PostgrestError, padrao: string): Error {
-  console.error("[clientes]", error);
-  const texto = `${error.message} ${error.details ?? ""}`;
-  const restricao = Object.keys(MENSAGENS_RESTRICAO).find((nome) => texto.includes(nome));
-  if (restricao) return new Error(MENSAGENS_RESTRICAO[restricao]);
-  if (error.code === "42501") {
-    // mensagens das nossas regras (triggers) já são amigáveis
-    return new Error(error.message.startsWith("Sem permissão") ? error.message : "Você não tem permissão para esta ação.");
-  }
-  if (error.code === "23514" && error.message === "Defina outro endereço como principal.") {
-    return new Error(error.message);
-  }
-  return new Error(padrao);
+function erro(error: PostgrestError, padrao: string): Error {
+  return erroAmigavel("clientes", error, MENSAGENS_RESTRICAO, padrao);
 }
 
 function termoDeBusca(texto: string): string {
@@ -96,7 +85,7 @@ export async function listarClientes(
   if (error) {
     // página além do total (ex.: filtro mudou): o chamador volta para a página 1
     if (error.code === "PGRST103") return { clientes: [], total: count ?? 0 };
-    throw erroAmigavel(error, "Não foi possível carregar os clientes.");
+    throw erro(error, "Não foi possível carregar os clientes.");
   }
   return { clientes: (data ?? []) as ClienteListagem[], total: count ?? 0 };
 }
@@ -121,7 +110,7 @@ export async function obterCliente(id: string): Promise<Cliente | null> {
   if (error) {
     // id malformado na URL
     if (error.code === "22P02") return null;
-    throw erroAmigavel(error, "Não foi possível carregar o cliente.");
+    throw erro(error, "Não foi possível carregar o cliente.");
   }
   return (data as Cliente | null) ?? null;
 }
@@ -162,7 +151,7 @@ export async function criarCliente(dados: DadosClienteForm, endereco: DadosEnder
     p_cliente: dadosParaBanco(dados),
     p_endereco: endereco ? enderecoParaBanco(endereco) : null,
   });
-  if (error) throw erroAmigavel(error, "Não foi possível cadastrar o cliente. Tente novamente.");
+  if (error) throw erro(error, "Não foi possível cadastrar o cliente. Tente novamente.");
   return data as string;
 }
 
@@ -174,7 +163,7 @@ export async function atualizarCliente(id: string, versao: number, dados: DadosC
     .eq("id", id)
     .eq("versao", versao)
     .select("id");
-  if (error) throw erroAmigavel(error, "Não foi possível salvar o cliente. Tente novamente.");
+  if (error) throw erro(error, "Não foi possível salvar o cliente. Tente novamente.");
   if (!data || data.length === 0) throw new ConflitoVersaoError();
 }
 
@@ -186,7 +175,7 @@ export async function definirArquivamento(id: string, versao: number, arquivar: 
     .eq("versao", versao)
     .select("id");
   if (error) {
-    throw erroAmigavel(error, arquivar ? "Não foi possível arquivar o cliente." : "Não foi possível reativar o cliente.");
+    throw erro(error, arquivar ? "Não foi possível arquivar o cliente." : "Não foi possível reativar o cliente.");
   }
   if (!data || data.length === 0) throw new ConflitoVersaoError();
 }
@@ -202,7 +191,7 @@ export async function listarEnderecos(clienteId: string): Promise<EnderecoClient
     .eq("cliente_id", clienteId)
     .order("principal", { ascending: false })
     .order("criado_em", { ascending: true });
-  if (error) throw erroAmigavel(error, "Não foi possível carregar os endereços.");
+  if (error) throw erro(error, "Não foi possível carregar os endereços.");
   return (data ?? []) as EnderecoCliente[];
 }
 
@@ -213,7 +202,7 @@ export async function criarEndereco(lojaId: string, clienteId: string, dados: Da
     cliente_id: clienteId,
     principal: dados.principal,
   });
-  if (error) throw erroAmigavel(error, "Não foi possível adicionar o endereço.");
+  if (error) throw erro(error, "Não foi possível adicionar o endereço.");
 }
 
 export async function atualizarEndereco(id: string, dados: DadosEnderecoForm, eraPrincipal: boolean): Promise<void> {
@@ -221,12 +210,12 @@ export async function atualizarEndereco(id: string, dados: DadosEnderecoForm, er
     .from("cliente_enderecos")
     .update({ ...enderecoParaBanco(dados), principal: eraPrincipal || dados.principal })
     .eq("id", id);
-  if (error) throw erroAmigavel(error, "Não foi possível salvar o endereço.");
+  if (error) throw erro(error, "Não foi possível salvar o endereço.");
 }
 
 export async function tornarPrincipal(id: string): Promise<void> {
   const { error } = await supabase.from("cliente_enderecos").update({ principal: true }).eq("id", id);
-  if (error) throw erroAmigavel(error, "Não foi possível definir o endereço principal.");
+  if (error) throw erro(error, "Não foi possível definir o endereço principal.");
 }
 
 export async function excluirEndereco(id: string): Promise<void> {
@@ -236,7 +225,7 @@ export async function excluirEndereco(id: string): Promise<void> {
       console.error("[clientes]", error);
       throw new Error("Este endereço está em uso e não pode ser excluído.");
     }
-    throw erroAmigavel(error, "Não foi possível excluir o endereço.");
+    throw erro(error, "Não foi possível excluir o endereço.");
   }
 }
 
@@ -246,10 +235,11 @@ export async function excluirEndereco(id: string): Promise<void> {
 
 export interface OsDoCliente {
   id: string;
+  numero: string;
+  titulo: string | null;
   criado_em: string;
   descricao: string;
   objeto_atendimento: string | null;
-  codigo_aparelho: string | null;
   status: { nome: string; cor: string | null; categoria: string } | null;
 }
 
@@ -257,13 +247,13 @@ export async function listarOsDoCliente(clienteId: string, limite = 20): Promise
   const { data, error, count } = await supabase
     .from("ordens_servico")
     .select(
-      "id, criado_em, descricao, objeto_atendimento, codigo_aparelho, status:status_os!ordens_servico_status_id_fkey(nome, cor, categoria)",
+      "id, numero, titulo, criado_em, descricao, objeto_atendimento, status:status_os!ordens_servico_status_id_fkey(nome, cor, categoria)",
       { count: "exact" },
     )
     .eq("cliente_id", clienteId)
     .order("criado_em", { ascending: false })
     .limit(limite);
-  if (error) throw erroAmigavel(error, "Não foi possível carregar as ordens de serviço.");
+  if (error) throw erro(error, "Não foi possível carregar as ordens de serviço.");
   return { ordens: (data ?? []) as unknown as OsDoCliente[], total: count ?? 0 };
 }
 
@@ -279,6 +269,6 @@ export interface EventoHistoricoCliente {
 
 export async function obterHistoricoCliente(clienteId: string): Promise<EventoHistoricoCliente[]> {
   const { data, error } = await supabase.rpc("cliente_historico", { p_cliente_id: clienteId, p_limite: 100 });
-  if (error) throw erroAmigavel(error, "Não foi possível carregar o histórico.");
+  if (error) throw erro(error, "Não foi possível carregar o histórico.");
   return (data ?? []) as EventoHistoricoCliente[];
 }

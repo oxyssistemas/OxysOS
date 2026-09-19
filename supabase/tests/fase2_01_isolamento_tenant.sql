@@ -134,12 +134,13 @@ begin
   end;
   execute 'reset role';
 
+  -- desde a fase 2 · 12 o histórico de status é gravado só pelo banco
   begin
     execute 'set local role authenticated';
     insert into public.os_historico (os_id, usuario_id) values (v_os_a, v_owner_a);
-    v_ok := v_ok + 1; v_log := v_log || E'\n  ok   histórico legítimo (autor = usuário logado) aceito';
-  exception when others then
-    v_falhas := v_falhas + 1; v_log := v_log || format(E'\n  FALHA histórico legítimo negado: %s', sqlerrm);
+    v_falhas := v_falhas + 1; v_log := v_log || E'\n  FALHA histórico inserido diretamente';
+  exception when insufficient_privilege then
+    v_ok := v_ok + 1; v_log := v_log || E'\n  ok   histórico só pelo banco (inserção direta negada, mesmo com autor correto)';
   end;
   execute 'reset role';
 
@@ -168,7 +169,12 @@ begin
   begin
     execute 'set local role authenticated';
     update public.usuarios set papel = 'super_admin', loja_id = null where id = v_owner_a;
-    v_falhas := v_falhas + 1; v_log := v_log || E'\n  FALHA owner virou super_admin';
+    get diagnostics v_n = row_count;
+    if v_n = 0 and exists (select 1 from public.usuarios where id = v_owner_a and papel = 'gerente' and loja_id = v_loja_a) then
+      v_ok := v_ok + 1; v_log := v_log || E'\n  ok   owner → super_admin → negado';
+    else
+      v_falhas := v_falhas + 1; v_log := v_log || E'\n  FALHA owner virou super_admin';
+    end if;
   exception when others then
     v_ok := v_ok + 1; v_log := v_log || E'\n  ok   owner → super_admin → negado';
   end;
@@ -191,7 +197,12 @@ begin
   begin
     execute 'set local role authenticated';
     update public.usuarios set ativo = false where id = v_owner_a;
-    v_falhas := v_falhas + 1; v_log := v_log || E'\n  FALHA empresa ficou sem proprietário ativo';
+    get diagnostics v_n = row_count;
+    if v_n = 0 and exists (select 1 from public.usuarios where id = v_owner_a and ativo) then
+      v_ok := v_ok + 1; v_log := v_log || E'\n  ok   desativar o único proprietário → negado';
+    else
+      v_falhas := v_falhas + 1; v_log := v_log || E'\n  FALHA empresa ficou sem proprietário ativo';
+    end if;
   exception when others then
     v_ok := v_ok + 1; v_log := v_log || E'\n  ok   desativar o único proprietário → negado';
   end;
@@ -280,6 +291,23 @@ begin
   execute 'reset role';
   if v_n = 0 then v_ok := v_ok + 1; v_log := v_log || E'\n  ok   anônimo não lê clientes';
   else v_falhas := v_falhas + 1; v_log := v_log || E'\n  FALHA anônimo lê clientes'; end if;
+
+  execute 'set local role anon';
+  select count(*) into v_n from public.usuarios;
+  select count(*) + v_n into v_n from public.lojas;
+  execute 'reset role';
+  if v_n = 0 then v_ok := v_ok + 1; v_log := v_log || E'\n  ok   anônimo não lê usuários nem empresas';
+  else v_falhas := v_falhas + 1; v_log := v_log || format(E'\n  FALHA anônimo lê %s registros de usuários/empresas', v_n); end if;
+
+  -- fase2_22: as funções de apoio deixaram de ser executáveis pelo anônimo
+  begin
+    execute 'set local role anon';
+    perform public.usuario_papel();
+    v_falhas := v_falhas + 1; v_log := v_log || E'\n  FALHA anônimo executou função de apoio';
+  exception when insufficient_privilege then
+    v_ok := v_ok + 1; v_log := v_log || E'\n  ok   anônimo não executa as funções de apoio';
+  end;
+  execute 'reset role';
 
   begin
     execute 'set local role anon';

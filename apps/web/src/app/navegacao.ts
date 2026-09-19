@@ -64,7 +64,14 @@ export const SECOES_NAVEGACAO: SecaoNavegacao[] = [
     titulo: "Gestão",
     itens: [
       { rota: "/app/team", label: "Equipe", icone: UserCog, permissao: "team.manage" },
-      { rota: "/app/reports", label: "Relatórios", icone: BarChart3, permissao: "reports.view" },
+      {
+        rota: "/app/reports",
+        label: "Relatórios",
+        icone: BarChart3,
+        // os números desta fase vêm das OS: sem o módulo não há relatório
+        feature: "service_orders",
+        permissao: "reports.view",
+      },
       { rota: "/app/inventory", label: "Estoque", icone: Package, feature: "inventory", emBreve: true },
       { rota: "/app/contracts", label: "Contratos", icone: FileSignature, feature: "contracts", emBreve: true },
       { rota: "/app/finance", label: "Financeiro", icone: Wallet, feature: "finance", emBreve: true },
