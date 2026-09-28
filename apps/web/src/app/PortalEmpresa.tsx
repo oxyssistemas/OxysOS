@@ -1,34 +1,37 @@
+import { lazy } from "react";
 import { Route, Routes } from "react-router-dom";
 import { CompanyProvider } from "./context/CompanyContext";
 import { GuardaEmpresa } from "./guards/GuardaEmpresa";
 import { RotaModulo } from "./guards/RotaModulo";
 import { PortalLayout } from "./layout/PortalLayout";
-import { DashboardPage } from "./pages/DashboardPage";
 import { NaoEncontradoPage } from "./pages/NaoEncontradoPage";
-import { ExecucaoPage } from "./legado/pages/ExecucaoPage";
 import { OrdensLayout } from "./ordens/OrdensLayout";
-import { OrdensPage } from "./ordens/OrdensPage";
-import { NovaOrdemPage } from "./ordens/NovaOrdemPage";
-import { OrdemDetalhePage } from "./ordens/OrdemDetalhePage";
-import { RelatorioTecnicoPage } from "./ordens/RelatorioTecnicoPage";
-import { ClientesPage } from "./clientes/ClientesPage";
-import { ClienteDetalhePage } from "./clientes/ClienteDetalhePage";
-import { TecnicosPage } from "./tecnicos/TecnicosPage";
-import { EquipamentosPage } from "./equipamentos/EquipamentosPage";
-import { EquipamentoDetalhePage } from "./equipamentos/EquipamentoDetalhePage";
-import { EquipamentoQrPage } from "./equipamentos/EquipamentoQrPage";
 import { ConfiguracoesInicio, ConfiguracoesLayout } from "./configuracoes/ConfiguracoesLayout";
-import { StatusOsPage } from "./configuracoes/StatusOsPage";
-import { PrioridadesPage } from "./configuracoes/PrioridadesPage";
-import { TiposServicoPage } from "./configuracoes/TiposServicoPage";
-import { ChecklistsPage } from "./configuracoes/ChecklistsPage";
-import { CatalogoPage } from "./configuracoes/CatalogoPage";
 import { EquipeLayout } from "./equipe/EquipeLayout";
-import { UsuariosPage } from "./equipe/UsuariosPage";
-import { CargosPage } from "./equipe/CargosPage";
-import { RelatoriosPage } from "./relatorios/RelatoriosPage";
-import { AgendaPage } from "./agenda/AgendaPage";
-import { DespachoPage } from "./despacho/DespachoPage";
+
+// Cada página em seu próprio chunk: o portal abre sem baixar agenda, despacho, relatórios etc.
+const DashboardPage = lazy(() => import("./pages/DashboardPage").then((m) => ({ default: m.DashboardPage })));
+const ExecucaoPage = lazy(() => import("./legado/pages/ExecucaoPage").then((m) => ({ default: m.ExecucaoPage })));
+const OrdensPage = lazy(() => import("./ordens/OrdensPage").then((m) => ({ default: m.OrdensPage })));
+const NovaOrdemPage = lazy(() => import("./ordens/NovaOrdemPage").then((m) => ({ default: m.NovaOrdemPage })));
+const OrdemDetalhePage = lazy(() => import("./ordens/OrdemDetalhePage").then((m) => ({ default: m.OrdemDetalhePage })));
+const RelatorioTecnicoPage = lazy(() => import("./ordens/RelatorioTecnicoPage").then((m) => ({ default: m.RelatorioTecnicoPage })));
+const ClientesPage = lazy(() => import("./clientes/ClientesPage").then((m) => ({ default: m.ClientesPage })));
+const ClienteDetalhePage = lazy(() => import("./clientes/ClienteDetalhePage").then((m) => ({ default: m.ClienteDetalhePage })));
+const TecnicosPage = lazy(() => import("./tecnicos/TecnicosPage").then((m) => ({ default: m.TecnicosPage })));
+const EquipamentosPage = lazy(() => import("./equipamentos/EquipamentosPage").then((m) => ({ default: m.EquipamentosPage })));
+const EquipamentoDetalhePage = lazy(() => import("./equipamentos/EquipamentoDetalhePage").then((m) => ({ default: m.EquipamentoDetalhePage })));
+const EquipamentoQrPage = lazy(() => import("./equipamentos/EquipamentoQrPage").then((m) => ({ default: m.EquipamentoQrPage })));
+const StatusOsPage = lazy(() => import("./configuracoes/StatusOsPage").then((m) => ({ default: m.StatusOsPage })));
+const PrioridadesPage = lazy(() => import("./configuracoes/PrioridadesPage").then((m) => ({ default: m.PrioridadesPage })));
+const TiposServicoPage = lazy(() => import("./configuracoes/TiposServicoPage").then((m) => ({ default: m.TiposServicoPage })));
+const ChecklistsPage = lazy(() => import("./configuracoes/ChecklistsPage").then((m) => ({ default: m.ChecklistsPage })));
+const CatalogoPage = lazy(() => import("./configuracoes/CatalogoPage").then((m) => ({ default: m.CatalogoPage })));
+const UsuariosPage = lazy(() => import("./equipe/UsuariosPage").then((m) => ({ default: m.UsuariosPage })));
+const CargosPage = lazy(() => import("./equipe/CargosPage").then((m) => ({ default: m.CargosPage })));
+const RelatoriosPage = lazy(() => import("./relatorios/RelatoriosPage").then((m) => ({ default: m.RelatoriosPage })));
+const AgendaPage = lazy(() => import("./agenda/AgendaPage").then((m) => ({ default: m.AgendaPage })));
+const DespachoPage = lazy(() => import("./despacho/DespachoPage").then((m) => ({ default: m.DespachoPage })));
 
 /** /app — Portal da Empresa (owner, gerente e equipe). */
 export function PortalEmpresa() {

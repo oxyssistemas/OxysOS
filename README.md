@@ -504,6 +504,22 @@ administrativa.
   (Authentication → Providers → Email → *Leaked password protection*); o CPF do técnico continua
   legível para quem tem `service_orders.view` (necessário no cadastro; avaliar mascarar).
 
+### Build final (fase 3 · etapa 20)
+
+- **Bateria completa reexecutada** depois das migrations de segurança: os 28 arquivos de
+  `supabase/tests` (fase 2 e fase 3) passam, todos com 0 falhas, e nenhum dado de teste fica no
+  banco. O `fase3_11` localizava um item pela posição na lista; como os itens do teste nascem na
+  mesma transação (mesmo `criado_em`), o desempate era aleatório — passou a localizar pelo nome.
+- **Código dividido por página** no Portal da Empresa (`React.lazy` em cada rota, com carregamento
+  dentro do layout): a casca do portal caiu de 915 kB para 35 kB e o build não emite mais o aviso
+  de pacote acima de 500 kB. O portal do técnico continua em um pacote só (~97 kB), o que ajuda o
+  modo offline.
+- Conferência no build de produção (`vite preview`): login, redirecionamento das rotas protegidas,
+  arquivos do PWA (`sw.js`, manifest com escopo `/technician`, ícones) servidos e console sem erros.
+- `typecheck` e `build` limpos; advisors sem apontamento novo (seguem os conhecidos: tabelas com RLS
+  e sem política de propósito, funções `SECURITY DEFINER` chamáveis por autenticados — validam por
+  dentro — e a proteção contra senhas vazadas, que depende do plano do Supabase).
+
 ## Código compartilhado (`@oxys/shared`)
 
 | Import                                 | Conteúdo                                          |

@@ -1,4 +1,5 @@
-import { useCallback, useState } from "react";
+import { Suspense, useCallback, useState } from "react";
+import { Loader2 } from "lucide-react";
 import { Outlet } from "react-router-dom";
 import { PortalSidebar } from "./PortalSidebar";
 import { PortalTopbar } from "./PortalTopbar";
@@ -20,7 +21,16 @@ export function PortalLayout() {
       <div className="flex min-w-0 flex-1 flex-col">
         <PortalTopbar onAbrirMenu={abrirMenu} />
         <main id="conteudo" className="flex-1 overflow-y-auto px-4 py-6 md:px-8 md:py-8">
-          <Outlet />
+          <Suspense
+            fallback={
+              <div className="flex justify-center py-16" role="status">
+                <Loader2 size={22} className="animate-spin text-accent" aria-hidden="true" />
+                <span className="sr-only">Carregando…</span>
+              </div>
+            }
+          >
+            <Outlet />
+          </Suspense>
         </main>
       </div>
     </div>

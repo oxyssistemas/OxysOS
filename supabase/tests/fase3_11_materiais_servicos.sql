@@ -193,8 +193,9 @@ begin
   if (v_json->>'pode_lancar')::boolean
      and not (v_json->>'mostra_valores')::boolean
      and jsonb_array_length(v_json->'itens') = 2
-     and (v_json->'itens'->0->'valor_unitario') = 'null'::jsonb
-     and (v_json->'itens'->0->>'unidade') = 'm' then
+     -- itens criados na mesma transação empatam no criado_em: localizar pelo nome, não pela posição
+     and (select e->'valor_unitario' from jsonb_array_elements(v_json->'itens') e where e->>'descricao' = 'Cabo UTP cat6') = 'null'::jsonb
+     and (select e->>'unidade' from jsonb_array_elements(v_json->'itens') e where e->>'descricao' = 'Cabo UTP cat6') = 'm' then
     v_ok := v_ok + 1; v_log := v_log || E'\n  ok   o técnico vê o que usou, com unidade, mas sem preço';
   else v_falhas := v_falhas + 1; v_log := v_log || format(E'\n  FALHA consulta do técnico: %s', v_json); end if;
 
@@ -204,7 +205,7 @@ begin
   select valor_total into v_num from public.ordens_servico where id = v_os;
   execute 'reset role';
   if (v_json->>'mostra_valores')::boolean
-     and (v_json->'itens'->0->>'subtotal')::numeric = 87.50
+     and (select (e->>'subtotal')::numeric from jsonb_array_elements(v_json->'itens') e where e->>'descricao' = 'Cabo UTP cat6') = 87.50
      and v_num = 537.50 then
     v_ok := v_ok + 1; v_log := v_log || E'\n  ok   quem edita a OS vê valores e o total da OS acompanha os itens';
   else v_falhas := v_falhas + 1; v_log := v_log || format(E'\n  FALHA valores: total %s / %s', v_num, v_json->'itens'->0); end if;
