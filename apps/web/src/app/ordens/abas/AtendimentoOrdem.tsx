@@ -4,6 +4,7 @@ import { TextareaField } from "@oxys/shared/components/Field";
 import { useToast } from "@oxys/shared/components/Toast";
 import { salvarAtendimento } from "../ordensService";
 import type { OrdemDetalhe } from "../tipos";
+import { CAMPOS_ATENDIMENTO, type CampoAtendimento } from "../tiposExecucao";
 
 interface AtendimentoOrdemProps {
   ordem: OrdemDetalhe;
@@ -11,25 +12,13 @@ interface AtendimentoOrdemProps {
   onSalvo: () => void;
 }
 
-type CampoAtendimento = "diagnostico" | "servico_executado" | "solucao" | "observacoes_tecnicas";
-
-const CAMPOS: { campo: CampoAtendimento; rotulo: string; dica: string }[] = [
-  { campo: "diagnostico", rotulo: "Diagnóstico", dica: "O que foi encontrado na análise." },
-  { campo: "servico_executado", rotulo: "Serviço executado", dica: "O que foi feito no atendimento." },
-  { campo: "solucao", rotulo: "Solução", dica: "Como o problema foi resolvido." },
-  { campo: "observacoes_tecnicas", rotulo: "Observações técnicas", dica: "Recomendações, pendências ou cuidados." },
-];
+const CAMPOS = CAMPOS_ATENDIMENTO;
 
 function valores(o: OrdemDetalhe): Record<CampoAtendimento, string> {
-  return {
-    diagnostico: o.diagnostico ?? "",
-    servico_executado: o.servico_executado ?? "",
-    solucao: o.solucao ?? "",
-    observacoes_tecnicas: o.observacoes_tecnicas ?? "",
-  };
+  return Object.fromEntries(CAMPOS.map(({ campo }) => [campo, o[campo] ?? ""])) as Record<CampoAtendimento, string>;
 }
 
-/** Registro técnico do atendimento (também usado pelo futuro Portal do Técnico). */
+/** Registro técnico do atendimento (§36); o técnico preenche o mesmo registro pelo portal. */
 export function AtendimentoOrdem({ ordem, podeEditar, onSalvo }: AtendimentoOrdemProps) {
   const { notificarSucesso, notificarErro } = useToast();
   const [form, setForm] = useState(() => valores(ordem));

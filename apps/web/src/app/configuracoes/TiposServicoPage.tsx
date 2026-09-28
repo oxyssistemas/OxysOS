@@ -11,12 +11,22 @@ import type { LocalAtendimento } from "../legado/types";
 import {
   atualizarTipoServico,
   criarTipoServico,
+  definirEspecialidadesDoTipo,
   definirTipoServicoAtivo,
   excluirTipoServico,
+  listarEspecialidadesDosTipos,
   listarTiposServico,
   obterUsoConfiguracaoOS,
 } from "./configuracaoOsService";
-import { SUGESTOES_TIPOS_SERVICO, type DadosTipoServicoForm, type TipoServico, type UsoConfiguracaoOS } from "./tipos";
+import { listarEspecialidades } from "../tecnicos/tecnicosService";
+import type { Especialidade } from "../tecnicos/tipos";
+import {
+  SUGESTOES_TIPOS_SERVICO,
+  resumoRequisitosTipo,
+  type DadosTipoServicoForm,
+  type TipoServico,
+  type UsoConfiguracaoOS,
+} from "./tipos";
 import { Selo } from "./components/Indicadores";
 
 export function TiposServicoPage() {
@@ -83,7 +93,9 @@ export function TiposServicoPage() {
     if (!company) return;
     executar(
       `sugestao:${nome}`,
-      () => criarTipoServico(company.id, { nome, descricao: "", local_atendimento_padrao: local ?? "" }),
+      async () => {
+        await criarTipoServico(company.id, { ...FORM_VAZIO, nome, local_atendimento_padrao: local ?? "" });
+      },
       `"${nome}" adicionado.`,
     );
   }
@@ -196,6 +208,7 @@ export function TiposServicoPage() {
                   <p className="mt-0.5 text-xs text-text-muted">
                     {t.descricao ? `${t.descricao} · ` : ""}
                     {n} OS
+                    {resumoRequisitosTipo(t).length > 0 && ` · para finalizar: ${resumoRequisitosTipo(t).join(", ")}`}
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
@@ -267,24 +280,68 @@ interface TipoServicoFormPanelProps {
   onSalvo: () => Promise<void>;
 }
 
-const FORM_VAZIO: DadosTipoServicoForm = { nome: "", descricao: "", local_atendimento_padrao: "" };
+const FORM_VAZIO: DadosTipoServicoForm = {
+  nome: "",
+  descricao: "",
+  local_atendimento_padrao: "",
+  exige_diagnostico: false,
+  exige_assinatura: false,
+  exige_materiais: false,
+  fotos_minimas: 0,
+};
+
+const REQUISITOS: { campo: "exige_diagnostico" | "exige_assinatura" | "exige_materiais"; rotulo: string }[] = [
+  { campo: "exige_diagnostico", rotulo: "Diagnóstico preenchido" },
+  { campo: "exige_assinatura", rotulo: "Assinatura do cliente" },
+  { campo: "exige_materiais", rotulo: "Materiais registrados" },
+];
 
 function TipoServicoFormPanel({ aberto, item, onFechar, onSalvo }: TipoServicoFormPanelProps) {
-  const { company } = useCompany();
+  const { company, hasFeature, can } = useCompany();
   const { notificarSucesso, notificarErro } = useToast();
   const [form, setForm] = useState<DadosTipoServicoForm>(FORM_VAZIO);
-  const [erros, setErros] = useState<{ nome?: string; descricao?: string }>({});
+  const [erros, setErros] = useState<{ nome?: string; descricao?: string; fotos_minimas?: string }>({});
   const [salvando, setSalvando] = useState(false);
+  const [especialidades, setEspecialidades] = useState<Especialidade[]>([]);
+  const [escolhidas, setEscolhidas] = useState<string[]>([]);
+  const [iniciais, setIniciais] = useState<string[]>([]);
+
+  // o vínculo alimenta a sugestão de técnico da central de despacho
+  const usaEspecialidades = hasFeature("technicians") && can("technicians.view");
 
   useEffect(() => {
     if (!aberto) return;
     setForm(
       item
-        ? { nome: item.nome, descricao: item.descricao ?? "", local_atendimento_padrao: item.local_atendimento_padrao ?? "" }
+        ? {
+            nome: item.nome,
+            descricao: item.descricao ?? "",
+            local_atendimento_padrao: item.local_atendimento_padrao ?? "",
+            exige_diagnostico: item.exige_diagnostico,
+            exige_assinatura: item.exige_assinatura,
+            exige_materiais: item.exige_materiais,
+            fotos_minimas: item.fotos_minimas,
+          }
         : FORM_VAZIO,
     );
     setErros({});
-  }, [aberto, item]);
+    setEscolhidas([]);
+    setIniciais([]);
+    if (!usaEspecialidades) return;
+    let cancelado = false;
+    Promise.all([listarEspecialidades(), listarEspecialidadesDosTipos()])
+      .then(([lista, porTipo]) => {
+        if (cancelado) return;
+        setEspecialidades(lista);
+        const atuais = item ? porTipo.get(item.id) ?? [] : [];
+        setEscolhidas(atuais);
+        setIniciais(atuais);
+      })
+      .catch(() => !cancelado && setEspecialidades([]));
+    return () => {
+      cancelado = true;
+    };
+  }, [aberto, item, usaEspecialidades]);
 
   async function salvar(e: FormEvent) {
     e.preventDefault();
@@ -293,18 +350,19 @@ function TipoServicoFormPanel({ aberto, item, onFechar, onSalvo }: TipoServicoFo
     if (!form.nome.trim()) novosErros.nome = "Informe o nome do tipo de serviço.";
     else if (form.nome.trim().length > 60) novosErros.nome = "Use até 60 caracteres.";
     if (form.descricao.trim().length > 300) novosErros.descricao = "Use até 300 caracteres.";
+    if (!Number.isInteger(form.fotos_minimas) || form.fotos_minimas < 0 || form.fotos_minimas > 20) {
+      novosErros.fotos_minimas = "Use um número de 0 a 20.";
+    }
     setErros(novosErros);
     if (Object.keys(novosErros).length > 0) return;
 
     setSalvando(true);
     try {
-      if (item) {
-        await atualizarTipoServico(item.id, form);
-        notificarSucesso("Tipo de serviço atualizado.");
-      } else {
-        await criarTipoServico(company.id, form);
-        notificarSucesso("Tipo de serviço criado.");
+      const id = item ? (await atualizarTipoServico(item.id, form), item.id) : await criarTipoServico(company.id, form);
+      if (usaEspecialidades) {
+        await definirEspecialidadesDoTipo(company.id, id, escolhidas, iniciais);
       }
+      notificarSucesso(item ? "Tipo de serviço atualizado." : "Tipo de serviço criado.");
       await onSalvo();
     } catch (err) {
       notificarErro(err instanceof Error ? err.message : "Não foi possível salvar.");
@@ -349,6 +407,86 @@ function TipoServicoFormPanel({ aberto, item, onFechar, onSalvo }: TipoServicoFo
           <option value="loja">Na loja (balcão)</option>
           <option value="externo">Externo (no cliente)</option>
         </SelectField>
+
+        <fieldset>
+          <legend className="mb-1 text-sm font-medium text-text-secondary">Para finalizar a OS</legend>
+          <p className="mb-2 text-xs text-text-muted">
+            O checklist obrigatório vale sempre. Marque o que mais este tipo exige — vale para o técnico em campo e
+            para quem finaliza pelo escritório.
+          </p>
+          <div className="flex flex-col gap-2">
+            {REQUISITOS.map(({ campo, rotulo }) => (
+              <label key={campo} className="flex cursor-pointer items-center gap-2.5 text-sm text-text-primary">
+                <input
+                  type="checkbox"
+                  checked={form[campo]}
+                  onChange={(e) => setForm({ ...form, [campo]: e.target.checked })}
+                  className="h-4 w-4 accent-[#1565FF]"
+                />
+                {rotulo}
+              </label>
+            ))}
+            <label className="flex items-center gap-2.5 text-sm text-text-primary">
+              <input
+                type="number"
+                min={0}
+                max={20}
+                step={1}
+                inputMode="numeric"
+                value={form.fotos_minimas}
+                onChange={(e) => setForm({ ...form, fotos_minimas: e.target.value === "" ? 0 : Number(e.target.value) })}
+                aria-invalid={!!erros.fotos_minimas}
+                aria-describedby="tipo_fotos_ajuda"
+                className={`w-20 rounded-lg border bg-base px-3 py-1.5 text-sm text-text-primary ${
+                  erros.fotos_minimas ? "border-danger" : "border-border"
+                }`}
+              />
+              <span id="tipo_fotos_ajuda">fotos no mínimo (0 = não exige)</span>
+            </label>
+            {erros.fotos_minimas && <span className="text-xs text-danger">{erros.fotos_minimas}</span>}
+          </div>
+        </fieldset>
+
+        {usaEspecialidades && (
+          <fieldset>
+            <legend className="mb-1 text-sm font-medium text-text-secondary">Especialidades exigidas</legend>
+            <p className="mb-2 text-xs text-text-muted">
+              A central de despacho sugere primeiro os técnicos que têm estas especialidades.
+            </p>
+            {especialidades.filter((e) => e.ativo || escolhidas.includes(e.id)).length === 0 ? (
+              <p className="text-sm text-text-muted">Nenhuma especialidade cadastrada em Técnicos.</p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {especialidades
+                  .filter((e) => e.ativo || escolhidas.includes(e.id))
+                  .map((e) => {
+                    const marcada = escolhidas.includes(e.id);
+                    return (
+                      <button
+                        key={e.id}
+                        type="button"
+                        role="checkbox"
+                        aria-checked={marcada}
+                        onClick={() =>
+                          setEscolhidas((atual) =>
+                            atual.includes(e.id) ? atual.filter((x) => x !== e.id) : [...atual, e.id],
+                          )
+                        }
+                        className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+                          marcada
+                            ? "border-accent bg-accent-muted text-text-primary"
+                            : "border-border text-text-secondary hover:bg-white/5"
+                        }`}
+                      >
+                        {e.nome}
+                        {!e.ativo && <span className="ml-1 text-text-muted">(inativa)</span>}
+                      </button>
+                    );
+                  })}
+              </div>
+            )}
+          </fieldset>
+        )}
 
         <div className="sticky -bottom-6 -mx-6 mt-2 flex justify-end gap-3 border-t border-border bg-panel px-6 py-4">
           <button

@@ -17,11 +17,14 @@ export function erroAmigavel(
   console.error(`[${contexto}]`, error);
   const texto = `${error.message} ${error.details ?? ""}`;
 
+  // sem resposta do servidor (sem internet, DNS, servidor fora): quem chamou decide se usa a cópia offline
+  if (ehFalhaDeRede(error)) return new ErroRede();
+
   const restricao = Object.keys(restricoes).find((nome) => texto.includes(nome));
   if (restricao) return new Error(restricoes[restricao]);
 
   // mensagens lançadas pelas nossas próprias regras (triggers/RPCs) já são amigáveis
-  const mensagemPropria = /^[A-ZÀ-Ú][^\n]{5,200}\.$/.test(error.message) && !/[_"()]/.test(error.message);
+  const mensagemPropria = /^[A-ZÀ-Ú][^\n]{5,300}\.$/.test(error.message) && !/[_"()]/.test(error.message);
   if (["42501", "23514", "40001", "P0002"].includes(error.code) && mensagemPropria) {
     return new Error(error.message);
   }
@@ -30,4 +33,21 @@ export function erroAmigavel(
   if (error.code === "40001") return new Error("Os dados foram alterados por outra pessoa. Recarregue antes de salvar.");
   if (error.code === "23503") return new Error("Este registro está em uso e não pode ser removido.");
   return new Error(padrao);
+}
+
+/** Falha de conexão (não chegou resposta do servidor), distinta de erro de regra/permissão. */
+export class ErroRede extends Error {
+  constructor(mensagem = "Sem conexão com a internet.") {
+    super(mensagem);
+    this.name = "ErroRede";
+  }
+}
+
+export function ehErroRede(e: unknown): boolean {
+  return e instanceof Error && e.name === "ErroRede";
+}
+
+function ehFalhaDeRede(error: PostgrestError): boolean {
+  const msg = `${error.message ?? ""}`.toLowerCase();
+  return !error.code && (msg.includes("failed to fetch") || msg.includes("networkerror") || msg.includes("load failed") || msg.includes("network request failed"));
 }

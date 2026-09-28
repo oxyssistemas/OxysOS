@@ -111,7 +111,7 @@ begin
   execute 'set local role authenticated';
   v_json := public.listar_cargos_permissoes();
   execute 'reset role';
-  if jsonb_array_length(v_json->'permissoes') = 20
+  if jsonb_array_length(v_json->'permissoes') = (select count(*) from public.permissoes)
      and v_json->'cargos' @> '[{"chave":"owner","sistema":true,"usuarios":1,"seu_cargo":true}]'
      and v_json->'cargos' @> '[{"nome":"Supervisor Técnico","sistema":false,"usuarios":1}]'
      and (select count(*) from jsonb_array_elements(v_json->'permissoes') p where (p->>'disponivel')::boolean) > 0 then

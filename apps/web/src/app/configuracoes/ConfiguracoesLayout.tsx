@@ -1,5 +1,5 @@
 import { Navigate, NavLink, Outlet } from "react-router-dom";
-import { ClipboardCheck, Flag, ListChecks, Wrench, type LucideIcon } from "lucide-react";
+import { Boxes, ClipboardCheck, Flag, ListChecks, Wrench, type LucideIcon } from "lucide-react";
 import { useCompany } from "../context/CompanyContext";
 
 interface Aba {
@@ -15,6 +15,7 @@ const ABAS: Aba[] = [
   { rota: "priorities", rotulo: "Prioridades", icone: Flag, exigeOs: true },
   { rota: "service-types", rotulo: "Tipos de serviço", icone: Wrench, exigeOs: true },
   { rota: "checklists", rotulo: "Checklists", icone: ClipboardCheck, exigeOs: true },
+  { rota: "catalog", rotulo: "Materiais e serviços", icone: Boxes, exigeOs: true },
 ];
 
 function abasConfiguracaoVisiveis(temOs: boolean): Aba[] {

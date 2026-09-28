@@ -2,15 +2,19 @@ import type { PostgrestError } from "@supabase/supabase-js";
 import { supabase } from "@oxys/shared/supabase";
 import { erroAmigavel } from "@/lib/erros";
 import type {
+  DadosItemCatalogoForm,
   DadosItemForm,
   DadosOrdemForm,
   FiltrosOrdens,
+  ItemCatalogo,
   ItemOrdem,
+  ItensOsResposta,
   OpcaoEquipamento,
   OpcaoTecnico,
   OrdemDetalhe,
   OrdemListagem,
 } from "./tipos";
+import type { CampoAtendimento } from "./tiposExecucao";
 
 export const ORDENS_POR_PAGINA = 20;
 
@@ -28,9 +32,23 @@ const MENSAGENS_RESTRICAO: Record<string, string> = {
   os_itens_descricao_tamanho: "Descreva o item (até 200 caracteres).",
   os_itens_quantidade_valida: "A quantidade deve ser maior que zero.",
   os_itens_valor_valido: "O valor não pode ser negativo.",
+  os_itens_unidade_tamanho: "A unidade deve ter até 10 caracteres.",
+  os_itens_observacao_tamanho: "A observação deve ter até 300 caracteres.",
+  catalogo_itens_nome_unico: "Já existe um item com esse nome nesse tipo.",
+  catalogo_itens_codigo_unico: "Já existe um item com esse código.",
+  catalogo_itens_nome_tamanho: "O nome deve ter até 120 caracteres.",
+  catalogo_itens_codigo_tamanho: "O código deve ter até 40 caracteres.",
+  catalogo_itens_unidade_tamanho: "A unidade deve ter até 10 caracteres.",
+  catalogo_itens_observacao_tamanho: "A observação deve ter até 300 caracteres.",
+  catalogo_itens_valor_valido: "Informe um valor entre 0 e 9.999.999.",
 };
 
 function erro(error: PostgrestError, padrao: string): Error {
+  // regras do catálogo já voltam com texto pronto
+  if (["23503", "22023"].includes(error.code) && /^[A-ZÀ-Ú][^\n]{5,200}\.$/.test(error.message) && !/[_"()]/.test(error.message)) {
+    console.error("[ordens]", error);
+    return new Error(error.message);
+  }
   return erroAmigavel("ordens", error, MENSAGENS_RESTRICAO, padrao);
 }
 
@@ -139,17 +157,12 @@ export function atualizarOrdem(id: string, versao: number, dados: DadosOrdemForm
 export function salvarAtendimento(
   id: string,
   versao: number,
-  dados: { diagnostico: string; servico_executado: string; solucao: string; observacoes_tecnicas: string },
+  dados: Record<CampoAtendimento, string>,
 ): Promise<void> {
   return atualizarComVersao(
     id,
     versao,
-    {
-      diagnostico: dados.diagnostico.trim() || null,
-      servico_executado: dados.servico_executado.trim() || null,
-      solucao: dados.solucao.trim() || null,
-      observacoes_tecnicas: dados.observacoes_tecnicas.trim() || null,
-    },
+    Object.fromEntries(Object.entries(dados).map(([campo, valor]) => [campo, valor.trim() || null])),
     "Não foi possível salvar o atendimento.",
   );
 }
@@ -178,7 +191,7 @@ export async function alterarStatus(id: string, statusId: string, observacao: st
 export async function listarItens(osId: string): Promise<ItemOrdem[]> {
   const { data, error } = await supabase
     .from("os_itens")
-    .select("id, os_id, tipo, descricao, quantidade, valor_unitario, subtotal, criado_em")
+    .select("id, os_id, tipo, descricao, unidade, quantidade, valor_unitario, subtotal, observacao, catalogo_item_id, criado_em")
     .eq("os_id", osId)
     .order("criado_em")
     .order("id");
@@ -195,8 +208,12 @@ function camposItem(dados: DadosItemForm) {
   return {
     tipo: dados.tipo,
     descricao: dados.descricao.trim(),
+    // do catálogo o banco copia tipo, nome e unidade; aqui só mandamos o vínculo
+    catalogo_item_id: dados.catalogo_item_id || null,
+    unidade: dados.unidade.trim() || "un",
     quantidade: Number(dados.quantidade.replace(",", ".")),
     valor_unitario: Number(dados.valor_unitario.replace(",", ".")),
+    observacao: dados.observacao.trim() || null,
   };
 }
 
@@ -213,6 +230,55 @@ export async function atualizarItem(id: string, dados: DadosItemForm): Promise<v
 export async function excluirItem(id: string): Promise<void> {
   const { error } = await supabase.from("os_itens").delete().eq("id", id);
   if (error) throw erro(error, "Não foi possível remover o item.");
+}
+
+/** Itens como o portal do técnico vê: sem preço para quem não edita a OS. */
+export async function obterItensOs(osId: string): Promise<ItensOsResposta> {
+  const { data, error } = await supabase.rpc("itens_os", { p_os_id: osId });
+  if (error) throw erro(error, "Não foi possível carregar os materiais e serviços.");
+  const r = data as ItensOsResposta;
+  return { ...r, itens: r.itens.map((i) => ({ ...i, quantidade: Number(i.quantidade) })) };
+}
+
+// ---------------------------------------------------------------------------
+// Catálogo de materiais e serviços
+// ---------------------------------------------------------------------------
+
+export async function listarCatalogoItens(): Promise<ItemCatalogo[]> {
+  const { data, error } = await supabase.rpc("listar_catalogo_itens");
+  if (error) throw erro(error, "Não foi possível carregar o catálogo.");
+  return ((data ?? []) as ItemCatalogo[]).map((c) => ({ ...c, valor_padrao: Number(c.valor_padrao) }));
+}
+
+export async function salvarItemCatalogo(
+  id: string | null,
+  versao: number | null,
+  dados: DadosItemCatalogoForm,
+): Promise<string> {
+  const { data, error } = await supabase.rpc("salvar_item_catalogo", {
+    p_id: id,
+    p_versao: versao,
+    p_dados: {
+      tipo: dados.tipo,
+      codigo: dados.codigo,
+      nome: dados.nome,
+      unidade: dados.unidade,
+      valor_padrao: dados.valor_padrao.replace(",", "."),
+      observacao: dados.observacao,
+    },
+  });
+  if (error) throw erro(error, "Não foi possível salvar o item do catálogo.");
+  return data as string;
+}
+
+export async function definirItemCatalogoAtivo(id: string, ativo: boolean): Promise<void> {
+  const { error } = await supabase.rpc("definir_item_catalogo_ativo", { p_id: id, p_ativo: ativo });
+  if (error) throw erro(error, ativo ? "Não foi possível reativar o item." : "Não foi possível desativar o item.");
+}
+
+export async function excluirItemCatalogo(id: string): Promise<void> {
+  const { error } = await supabase.rpc("excluir_item_catalogo", { p_id: id });
+  if (error) throw erro(error, "Não foi possível excluir o item do catálogo.");
 }
 
 // ---------------------------------------------------------------------------

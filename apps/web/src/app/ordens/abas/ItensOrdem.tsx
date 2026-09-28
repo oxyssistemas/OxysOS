@@ -4,8 +4,24 @@ import { SidePanel } from "@oxys/shared/components/SidePanel";
 import { Field, SelectField } from "@oxys/shared/components/Field";
 import { useToast } from "@oxys/shared/components/Toast";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { atualizarItem, criarItem, definirDesconto, excluirItem, listarItens } from "../ordensService";
-import { ROTULO_TIPO_ITEM, TIPOS_ITEM, formatarMoeda, type DadosItemForm, type ItemOrdem, type OrdemDetalhe } from "../tipos";
+import {
+  atualizarItem,
+  criarItem,
+  definirDesconto,
+  excluirItem,
+  listarCatalogoItens,
+  listarItens,
+} from "../ordensService";
+import {
+  ROTULO_TIPO_ITEM,
+  TIPOS_ITEM,
+  UNIDADES_SUGERIDAS,
+  formatarMoeda,
+  type DadosItemForm,
+  type ItemCatalogo,
+  type ItemOrdem,
+  type OrdemDetalhe,
+} from "../tipos";
 
 interface ItensOrdemProps {
   ordem: OrdemDetalhe;
@@ -14,7 +30,15 @@ interface ItensOrdemProps {
   onAlterado: () => void;
 }
 
-const ITEM_VAZIO: DadosItemForm = { tipo: "servico", descricao: "", quantidade: "1", valor_unitario: "" };
+const ITEM_VAZIO: DadosItemForm = {
+  tipo: "servico",
+  descricao: "",
+  unidade: "un",
+  quantidade: "1",
+  valor_unitario: "",
+  observacao: "",
+  catalogo_item_id: "",
+};
 
 function numero(texto: string): number {
   return Number(texto.replace(",", "."));
@@ -23,6 +47,7 @@ function numero(texto: string): number {
 export function ItensOrdem({ ordem, podeEditar, onAlterado }: ItensOrdemProps) {
   const { notificarSucesso, notificarErro } = useToast();
   const [itens, setItens] = useState<ItemOrdem[] | null>(null);
+  const [catalogo, setCatalogo] = useState<ItemCatalogo[]>([]);
   const [painel, setPainel] = useState<{ aberto: boolean; item: ItemOrdem | null }>({ aberto: false, item: null });
   const [form, setForm] = useState<DadosItemForm>(ITEM_VAZIO);
   const [erros, setErros] = useState<Partial<Record<keyof DadosItemForm, string>>>({});
@@ -48,10 +73,25 @@ export function ItensOrdem({ ordem, podeEditar, onAlterado }: ItensOrdemProps) {
     setDesconto(String(ordem.desconto));
   }, [ordem.desconto]);
 
+  useEffect(() => {
+    if (!podeEditar) return;
+    listarCatalogoItens()
+      .then((c) => setCatalogo(c.filter((i) => i.ativo)))
+      .catch(() => setCatalogo([]));
+  }, [podeEditar]);
+
   function abrir(item: ItemOrdem | null) {
     setForm(
       item
-        ? { tipo: item.tipo, descricao: item.descricao, quantidade: String(item.quantidade), valor_unitario: String(item.valor_unitario) }
+        ? {
+            tipo: item.tipo,
+            descricao: item.descricao,
+            unidade: item.unidade,
+            quantidade: String(item.quantidade),
+            valor_unitario: String(item.valor_unitario),
+            observacao: item.observacao ?? "",
+            catalogo_item_id: item.catalogo_item_id ?? "",
+          }
         : ITEM_VAZIO,
     );
     setErros({});
@@ -122,6 +162,24 @@ export function ItensOrdem({ ordem, podeEditar, onAlterado }: ItensOrdemProps) {
     }
   }
 
+  /** Escolher do catálogo preenche tipo, nome, unidade e valor sugerido. */
+  function escolherDoCatalogo(id: string) {
+    const item = catalogo.find((c) => c.id === id);
+    if (!item) {
+      setForm((f) => ({ ...f, catalogo_item_id: "" }));
+      return;
+    }
+    setForm((f) => ({
+      ...f,
+      catalogo_item_id: item.id,
+      tipo: item.tipo,
+      descricao: item.nome,
+      unidade: item.unidade,
+      valor_unitario: item.valor_padrao ? String(item.valor_padrao) : f.valor_unitario,
+    }));
+    setErros({});
+  }
+
   const previa = numero(form.quantidade) * numero(form.valor_unitario);
 
   return (
@@ -172,9 +230,14 @@ export function ItensOrdem({ ordem, podeEditar, onAlterado }: ItensOrdemProps) {
             <tbody>
               {itens.map((item) => (
                 <tr key={item.id} className="border-b border-border last:border-0">
-                  <td className="px-5 py-3 text-text-primary">{item.descricao}</td>
+                  <td className="px-5 py-3 text-text-primary">
+                    {item.descricao}
+                    {item.observacao && <span className="block text-xs text-text-muted">{item.observacao}</span>}
+                  </td>
                   <td className="whitespace-nowrap px-3 py-3 text-text-secondary">{ROTULO_TIPO_ITEM[item.tipo]}</td>
-                  <td className="px-3 py-3 text-right tabular-nums text-text-secondary">{item.quantidade.toLocaleString("pt-BR")}</td>
+                  <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums text-text-secondary">
+                    {item.quantidade.toLocaleString("pt-BR")} {item.unidade}
+                  </td>
                   <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums text-text-secondary">{formatarMoeda(item.valor_unitario)}</td>
                   <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums text-text-primary">{formatarMoeda(item.subtotal)}</td>
                   {podeEditar && (
@@ -235,7 +298,28 @@ export function ItensOrdem({ ordem, podeEditar, onAlterado }: ItensOrdemProps) {
         subtitulo={ordem.numero}
       >
         <form onSubmit={salvar} noValidate className="flex flex-col gap-4">
-          <SelectField id="item_tipo" label="Tipo" value={form.tipo} onChange={(e) => setForm({ ...form, tipo: e.target.value as DadosItemForm["tipo"] })}>
+          {catalogo.length > 0 && (
+            <SelectField
+              id="item_catalogo"
+              label="Do catálogo (opcional)"
+              value={form.catalogo_item_id}
+              onChange={(e) => escolherDoCatalogo(e.target.value)}
+            >
+              <option value="">Item avulso (digitar)</option>
+              {catalogo.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {ROTULO_TIPO_ITEM[c.tipo]} · {c.nome} ({c.unidade}) — {formatarMoeda(c.valor_padrao)}
+                </option>
+              ))}
+            </SelectField>
+          )}
+          <SelectField
+            id="item_tipo"
+            label="Tipo"
+            value={form.tipo}
+            disabled={!!form.catalogo_item_id}
+            onChange={(e) => setForm({ ...form, tipo: e.target.value as DadosItemForm["tipo"] })}
+          >
             {TIPOS_ITEM.map((t) => (
               <option key={t.valor} value={t.valor}>
                 {t.rotulo}
@@ -247,11 +331,12 @@ export function ItensOrdem({ ordem, podeEditar, onAlterado }: ItensOrdemProps) {
             label="Descrição"
             maxLength={200}
             value={form.descricao}
+            disabled={!!form.catalogo_item_id}
             onChange={(e) => setForm({ ...form, descricao: e.target.value })}
             erro={erros.descricao}
             autoFocus
           />
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-3 gap-3">
             <Field
               id="item_quantidade"
               label="Quantidade"
@@ -260,6 +345,25 @@ export function ItensOrdem({ ordem, podeEditar, onAlterado }: ItensOrdemProps) {
               onChange={(e) => setForm({ ...form, quantidade: e.target.value.replace(/[^\d.,]/g, "") })}
               erro={erros.quantidade}
             />
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="item_unidade" className="text-sm font-medium text-text-secondary">
+                Unidade
+              </label>
+              <input
+                id="item_unidade"
+                list="unidades-item"
+                maxLength={10}
+                value={form.unidade}
+                disabled={!!form.catalogo_item_id}
+                onChange={(e) => setForm({ ...form, unidade: e.target.value })}
+                className="rounded-lg border border-border bg-base px-3.5 py-2.5 text-sm text-text-primary focus:border-accent disabled:opacity-60"
+              />
+              <datalist id="unidades-item">
+                {UNIDADES_SUGERIDAS.map((u) => (
+                  <option key={u} value={u} />
+                ))}
+              </datalist>
+            </div>
             <Field
               id="item_valor"
               label="Valor unitário (R$)"
@@ -269,6 +373,19 @@ export function ItensOrdem({ ordem, podeEditar, onAlterado }: ItensOrdemProps) {
               erro={erros.valor_unitario}
             />
           </div>
+          <Field
+            id="item_observacao"
+            label="Observação (opcional)"
+            maxLength={300}
+            placeholder="Ex.: passagem no forro, peça do cliente"
+            value={form.observacao}
+            onChange={(e) => setForm({ ...form, observacao: e.target.value })}
+          />
+          {form.catalogo_item_id && (
+            <p className="text-xs text-text-muted">
+              Tipo, descrição e unidade vêm do catálogo. Para mudar, escolha “Item avulso”.
+            </p>
+          )}
           <p className="text-sm text-text-secondary">
             Subtotal: <span className="font-medium text-text-primary">{Number.isFinite(previa) ? formatarMoeda(previa) : "—"}</span>
           </p>

@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import {
   AlertTriangle,
   CheckCircle2,
+  CalendarClock,
   ChevronLeft,
   ChevronRight,
   CircleSlash,
@@ -11,6 +12,7 @@ import {
   RefreshCw,
   Search,
   Tags,
+  Users,
   Wrench,
   X,
 } from "lucide-react";
@@ -27,6 +29,8 @@ import {
 import { nomeCompleto, type Especialidade, type FiltroStatusTecnico, type FiltrosTecnicos, type TecnicoListagem } from "./tipos";
 import { TecnicoFormPanel } from "./components/TecnicoFormPanel";
 import { EspecialidadesPanel } from "./components/EspecialidadesPanel";
+import { EquipesPanel } from "./components/EquipesPanel";
+import { DisponibilidadePanel } from "./components/DisponibilidadePanel";
 
 function filtrosDaUrl(params: URLSearchParams): FiltrosTecnicos {
   const status = params.get("status");
@@ -86,6 +90,8 @@ export function TecnicosPage() {
 
   const [painel, setPainel] = useState<{ aberto: boolean; tecnicoId: string | null }>({ aberto: false, tecnicoId: null });
   const [painelEspecialidades, setPainelEspecialidades] = useState(false);
+  const [painelEquipes, setPainelEquipes] = useState(false);
+  const [disponibilidade, setDisponibilidade] = useState<TecnicoListagem | null>(null);
   const [alternar, setAlternar] = useState<TecnicoListagem | null>(null);
   const [processando, setProcessando] = useState(false);
   const requisicao = useRef(0);
@@ -166,29 +172,41 @@ export function TecnicosPage() {
     setPainel({ aberto: true, tecnicoId: t.id });
   }
 
-  const acoes = (t: TecnicoListagem) =>
-    podeGerenciar && (
-      <div className="flex justify-end gap-3 text-xs">
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            abrir(t);
-          }}
-          className="font-medium text-text-secondary hover:text-text-primary"
-        >
-          Editar
-        </button>
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            setAlternar(t);
-          }}
-          className="font-medium text-text-secondary hover:text-text-primary"
-        >
-          {t.ativo ? "Desativar" : "Reativar"}
-        </button>
-      </div>
-    );
+  const acoes = (t: TecnicoListagem) => (
+    <div className="flex justify-end gap-3 text-xs">
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          setDisponibilidade(t);
+        }}
+        className="font-medium text-text-secondary hover:text-text-primary"
+      >
+        Disponibilidade
+      </button>
+      {podeGerenciar && (
+        <>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              abrir(t);
+            }}
+            className="font-medium text-text-secondary hover:text-text-primary"
+          >
+            Editar
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setAlternar(t);
+            }}
+            className="font-medium text-text-secondary hover:text-text-primary"
+          >
+            {t.ativo ? "Desativar" : "Reativar"}
+          </button>
+        </>
+      )}
+    </div>
+  );
 
   return (
     <div className="mx-auto max-w-7xl">
@@ -201,6 +219,12 @@ export function TecnicosPage() {
         </div>
         {podeGerenciar && (
           <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => setPainelEquipes(true)}
+              className="flex items-center gap-2 rounded-lg border border-border px-4 py-2.5 text-sm font-medium text-text-secondary hover:bg-white/5 hover:text-text-primary"
+            >
+              <Users size={16} aria-hidden="true" /> Equipes
+            </button>
             <button
               onClick={() => setPainelEspecialidades(true)}
               className="flex items-center gap-2 rounded-lg border border-border px-4 py-2.5 text-sm font-medium text-text-secondary hover:bg-white/5 hover:text-text-primary"
@@ -344,11 +368,9 @@ export function TecnicosPage() {
                       Em andamento
                     </th>
                     <th scope="col" className="px-5 py-3 text-right font-medium">Concluídas</th>
-                    {podeGerenciar && (
-                      <th scope="col" className="px-5 py-3 text-right font-medium">
-                        <span className="sr-only">Ações</span>
-                      </th>
-                    )}
+                    <th scope="col" className="px-5 py-3 text-right font-medium">
+                      <span className="sr-only">Ações</span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -384,7 +406,7 @@ export function TecnicosPage() {
                       </td>
                       <td className="px-5 py-3.5 text-right tabular-nums text-text-primary">{t.os_em_andamento}</td>
                       <td className="px-5 py-3.5 text-right tabular-nums text-text-primary">{t.os_concluidas}</td>
-                      {podeGerenciar && <td className="px-5 py-3.5">{acoes(t)}</td>}
+                      <td className="px-5 py-3.5">{acoes(t)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -414,7 +436,7 @@ export function TecnicosPage() {
                       {t.os_em_andamento} em andamento · {t.os_concluidas} concluídas
                     </p>
                   </button>
-                  {podeGerenciar && <div className="mt-3 border-t border-border pt-3">{acoes(t)}</div>}
+                  <div className="mt-3 border-t border-border pt-3">{acoes(t)}</div>
                 </li>
               ))}
             </ul>
@@ -455,6 +477,22 @@ export function TecnicosPage() {
           carregar();
           carregarEspecialidades();
         }}
+      />
+
+      {podeGerenciar && (
+        <EquipesPanel
+          aberto={painelEquipes}
+          onFechar={() => setPainelEquipes(false)}
+          onAlterado={carregar}
+        />
+      )}
+
+      <DisponibilidadePanel
+        aberto={!!disponibilidade}
+        tecnicoId={disponibilidade?.id ?? null}
+        tecnicoNome={disponibilidade ? nomeCompleto(disponibilidade) : ""}
+        somenteLeitura={!podeGerenciar}
+        onFechar={() => setDisponibilidade(null)}
       />
 
       {podeGerenciar && (

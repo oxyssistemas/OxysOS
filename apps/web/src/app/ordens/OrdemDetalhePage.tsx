@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   Ban,
   CheckCircle2,
+  ClipboardCheck,
   ClipboardList,
   Download,
   FileText,
@@ -30,19 +31,22 @@ import { SlaBadge } from "./components/Indicadores";
 import { EditarOrdemPanel } from "./components/EditarOrdemPanel";
 import { StatusOrdemPanel, type ModoStatus } from "./components/StatusOrdemPanel";
 import { TecnicoOrdemPanel } from "./components/TecnicoOrdemPanel";
+import { ConfirmacaoClienteCard } from "./components/ConfirmacaoClienteCard";
 import { ItensOrdem } from "./abas/ItensOrdem";
 import { AtendimentoOrdem } from "./abas/AtendimentoOrdem";
 import { AnexosOrdem } from "./abas/AnexosOrdem";
 import { ChecklistOrdem } from "./abas/ChecklistOrdem";
+import { HorasOrdem } from "./abas/HorasOrdem";
 import { TimelineOrdem } from "./abas/TimelineOrdem";
 import { documentoOS, reciboOS } from "./pdf";
 import { estaEncerrada, formatarAgendamento, formatarDataHora, formatarMoeda, type OrdemDetalhe } from "./tipos";
 
-type Aba = "resumo" | "atendimento" | "itens" | "checklist" | "arquivos" | "historico";
+type Aba = "resumo" | "atendimento" | "horas" | "itens" | "checklist" | "arquivos" | "historico";
 
 const ABAS: { id: Aba; rotulo: string }[] = [
   { id: "resumo", rotulo: "Resumo" },
   { id: "atendimento", rotulo: "Atendimento" },
+  { id: "horas", rotulo: "Horas" },
   { id: "itens", rotulo: "Itens" },
   { id: "checklist", rotulo: "Checklist" },
   { id: "arquivos", rotulo: "Arquivos" },
@@ -235,6 +239,9 @@ export function OrdemDetalhePage() {
             {gerando === "os-true" ? <Loader2 size={15} className="animate-spin" aria-hidden="true" /> : <Share2 size={15} aria-hidden="true" />}
             Compartilhar
           </button>
+          <Link to={`/app/service-orders/${ordem.id}/report`} className={botaoSecundario}>
+            <ClipboardCheck size={15} aria-hidden="true" /> Relatório técnico
+          </Link>
           {finalizada && (
             <button onClick={() => gerarPdf("recibo", false)} disabled={gerando !== null} className={botaoSecundario}>
               {gerando === "recibo-false" ? <Loader2 size={15} className="animate-spin" aria-hidden="true" /> : <FileText size={15} aria-hidden="true" />}
@@ -360,13 +367,25 @@ export function OrdemDetalhePage() {
         )}
 
         {aba === "atendimento" && (
-          <AtendimentoOrdem ordem={ordem} podeEditar={can("service_orders.edit")} onSalvo={recarregar} />
+          <div className="flex flex-col gap-5">
+            <AtendimentoOrdem ordem={ordem} podeEditar={can("service_orders.edit")} onSalvo={recarregar} />
+            <ConfirmacaoClienteCard osId={ordem.id} chave={`${ordem.versao}-${ordem.status_id}`} />
+          </div>
         )}
+
+        {aba === "horas" && <HorasOrdem osId={ordem.id} tecnicos={apoio?.tecnicos ?? null} encerrada={encerrada} />}
 
         {aba === "itens" && <ItensOrdem ordem={ordem} podeEditar={podeEditar} onAlterado={recarregar} />}
 
         {aba === "checklist" && company && (
-          <ChecklistOrdem ordem={ordem} lojaId={company.id} podeEditar={podeEditar} encerrada={encerrada} />
+          <ChecklistOrdem
+            ordem={ordem}
+            lojaId={company.id}
+            /* responder o checklist também vale com checklists.fill (o cargo de campo) */
+            podeEditar={(can("service_orders.edit") || can("checklists.fill")) && !encerrada}
+            podeAplicar={podeEditar}
+            encerrada={encerrada}
+          />
         )}
 
         {aba === "arquivos" && company && <AnexosOrdem osId={ordem.id} lojaId={company.id} podeEditar={can("service_orders.edit")} />}

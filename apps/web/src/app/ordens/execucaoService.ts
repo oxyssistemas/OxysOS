@@ -1,13 +1,21 @@
 import type { PostgrestError } from "@supabase/supabase-js";
 import { supabase } from "@oxys/shared/supabase";
-import { erroAmigavel } from "@/lib/erros";
+import { ErroRede, ehErroRede, erroAmigavel } from "@/lib/erros";
+import { comprimirImagem } from "@/lib/imagem";
 import type {
   AnexoOS,
+  AssinaturaOS,
+  DadosConfirmacaoCliente,
   ChecklistOS,
   DadosModeloForm,
   EventoTimeline,
+  HorasOS,
   MomentoFoto,
   ModeloChecklist,
+  MotivoPausaOS,
+  TipoApontamento,
+  ResumoFinalizacao,
+  LeituraRelatorio,
 } from "./tiposExecucao";
 import { ehFotoArquivo, tipoPorExtensao } from "./tiposExecucao";
 
@@ -24,12 +32,15 @@ const MENSAGENS_RESTRICAO: Record<string, string> = {
   checklist_modelo_itens_ajuda_tamanho: "O texto de ajuda deve ter até 300 caracteres.",
   checklist_modelo_itens_opcoes: "Listas de opções aceitam de 2 a 30 opções.",
   os_checklist_itens_texto_tamanho: "O texto deve ter até 2.000 caracteres.",
+  os_apontamentos_intervalo: "O fim precisa ser depois do início.",
+  os_apontamentos_observacao: "A observação deve ter até 300 caracteres.",
+  os_apontamentos_sem_sobreposicao: "O técnico já tem tempo apontado nesse intervalo.",
 };
 
 function erro(error: PostgrestError, padrao: string): Error {
   const e = erroAmigavel("os-execucao", error, MENSAGENS_RESTRICAO, padrao);
   // validações de resposta do checklist e duplicidade também trazem mensagens próprias
-  if (["22023", "23505", "23503", "P0002"].includes(error.code) && /^[A-ZÀ-Ú][^\n]{5,200}\.$/.test(error.message)) {
+  if (["22023", "23505", "23503", "23P01", "P0002"].includes(error.code) && /^[A-ZÀ-Ú][^\n]{5,200}\.$/.test(error.message)) {
     return new Error(error.message);
   }
   return e;
@@ -55,10 +66,14 @@ export async function enviarAnexo(input: {
   arquivo: File;
   momento: MomentoFoto | null;
   descricao?: string;
+  /** id gerado no aparelho (fila offline): reenviar não duplica arquivo nem registro */
+  id?: string;
 }): Promise<string> {
-  const { lojaId, osId, arquivo } = input;
+  const { lojaId, osId } = input;
+  // foto de celular é reduzida antes de subir (§33); documento vai como está
+  const { arquivo } = await comprimirImagem(input.arquivo);
   const extensao = arquivo.name.includes(".") ? arquivo.name.split(".").pop()!.toLowerCase().replace(/[^a-z0-9]/g, "") : "";
-  const caminho = `${lojaId}/${osId}/${crypto.randomUUID()}${extensao ? `.${extensao}` : ""}`;
+  const caminho = `${lojaId}/${osId}/${input.id ?? crypto.randomUUID()}${extensao ? `.${extensao}` : ""}`;
   const contentType = arquivo.type || tipoPorExtensao(arquivo.name) || "application/octet-stream";
 
   const { error: erroUpload } = await supabase.storage.from(BUCKET).upload(caminho, arquivo, {
@@ -66,9 +81,12 @@ export async function enviarAnexo(input: {
     upsert: false,
     contentType,
   });
-  if (erroUpload) {
+  // reenvio da fila: o arquivo já subiu na tentativa anterior
+  const jaEnviado = !!input.id && !!erroUpload && /already exists|duplicate/i.test(erroUpload.message);
+  if (erroUpload && !jaEnviado) {
     console.error("[os-execucao] upload", erroUpload);
     const msg = erroUpload.message.toLowerCase();
+    if (msg.includes("failed to fetch") || msg.includes("networkerror") || msg.includes("load failed")) throw new ErroRede();
     if (msg.includes("size") || msg.includes("too large")) throw new Error("O arquivo excede o tamanho permitido.");
     if (msg.includes("mime") || msg.includes("type")) throw new Error("Formato de arquivo não aceito.");
     if (msg.includes("row-level security") || msg.includes("unauthorized")) throw new Error("Você não tem permissão para anexar arquivos.");
@@ -79,6 +97,7 @@ export async function enviarAnexo(input: {
   const { data, error } = await supabase
     .from("os_anexos")
     .insert({
+      ...(input.id ? { id: input.id } : {}),
       loja_id: lojaId,
       os_id: osId,
       tipo: foto ? "foto" : "documento",
@@ -92,10 +111,14 @@ export async function enviarAnexo(input: {
     })
     .select("id")
     .single();
+  // reenvio da fila: o registro já existe (mesmo id) — nada a fazer
+  if (error && input.id && error.code === "23505") return input.id;
   if (error) {
+    const e = erro(error, "Não foi possível registrar o arquivo.");
+    if (ehErroRede(e)) throw e;
     const { error: erroLimpeza } = await supabase.storage.from(BUCKET).remove([caminho]);
     if (erroLimpeza) console.error("[os-execucao] limpeza do arquivo órfão", erroLimpeza);
-    throw erro(error, "Não foi possível registrar o arquivo.");
+    throw e;
   }
   return data.id as string;
 }
@@ -203,6 +226,12 @@ export async function salvarModeloChecklist(id: string | null, versao: number | 
       obrigatorio: i.obrigatorio,
       ajuda: i.ajuda,
       opcoes: i.tipo === "selecao" ? i.opcoes.split("\n").map((o) => o.trim()).filter(Boolean) : [],
+      // medição e condição: o banco ignora o que não combina com o tipo
+      unidade: i.unidade,
+      valor_min: i.valor_min,
+      valor_max: i.valor_max,
+      depende_de_ordem: i.depende_de_ordem,
+      condicao_valor: i.condicao_valor,
     })),
   });
   if (error) throw erro(error, "Não foi possível salvar o modelo.");
@@ -217,4 +246,105 @@ export async function definirModeloChecklistAtivo(id: string, ativo: boolean): P
 export async function excluirModeloChecklist(id: string): Promise<void> {
   const { error } = await supabase.rpc("excluir_checklist_modelo", { p_id: id });
   if (error) throw erro(error, "Não foi possível excluir o modelo.");
+}
+
+// ---------------------------------------------------------------------------
+// Apontamento de horas
+// ---------------------------------------------------------------------------
+
+export async function obterHorasOs(osId: string): Promise<HorasOS> {
+  const { data, error } = await supabase.rpc("horas_os", { p_os_id: osId });
+  if (error) throw erro(error, "Não foi possível carregar as horas da OS.");
+  return data as HorasOS;
+}
+
+export async function lancarApontamento(input: {
+  osId: string;
+  tecnicoId: string;
+  tipo: TipoApontamento;
+  inicio: string;
+  fim: string;
+  motivo: MotivoPausaOS | null;
+  observacao: string;
+}): Promise<string> {
+  const { data, error } = await supabase.rpc("lancar_apontamento", {
+    p_os_id: input.osId,
+    p_tecnico_id: input.tecnicoId,
+    p_tipo: input.tipo,
+    p_inicio: input.inicio,
+    p_fim: input.fim,
+    p_motivo: input.tipo === "pausa" ? input.motivo : null,
+    p_observacao: input.observacao || null,
+  });
+  if (error) throw erro(error, "Não foi possível lançar as horas.");
+  return data as string;
+}
+
+export async function ajustarApontamento(input: {
+  id: string;
+  inicio: string;
+  fim: string | null;
+  motivo: MotivoPausaOS | null;
+  observacao: string;
+}): Promise<void> {
+  const { error } = await supabase.rpc("ajustar_apontamento", {
+    p_id: input.id,
+    p_inicio: input.inicio,
+    p_fim: input.fim,
+    p_motivo: input.motivo,
+    p_observacao: input.observacao || null,
+  });
+  if (error) throw erro(error, "Não foi possível corrigir o apontamento.");
+}
+
+export async function excluirApontamento(id: string): Promise<void> {
+  const { error } = await supabase.rpc("excluir_apontamento", { p_id: id });
+  if (error) throw erro(error, "Não foi possível excluir o apontamento.");
+}
+
+// ---------------------------------------------------------------------------
+// Assinatura e confirmação do cliente
+// ---------------------------------------------------------------------------
+
+export async function obterAssinaturaOs(osId: string): Promise<AssinaturaOS> {
+  const { data, error } = await supabase.rpc("assinatura_os", { p_os_id: osId });
+  if (error) throw erro(error, "Não foi possível carregar a assinatura.");
+  return data as AssinaturaOS;
+}
+
+/** O servidor confere o PNG, calcula o SHA-256 e usa o próprio relógio. */
+export async function registrarAssinaturaOs(input: {
+  osId: string;
+  dados: DadosConfirmacaoCliente;
+  imagem: string;
+  agendamentoId?: string | null;
+}): Promise<{ id: string; assinado_em: string; substituiu: boolean }> {
+  const { data, error } = await supabase.rpc("registrar_assinatura_os", {
+    p_os_id: input.osId,
+    p_nome: input.dados.nome.trim(),
+    p_documento: input.dados.documento.trim() || null,
+    p_observacao: input.dados.observacao.trim() || null,
+    p_imagem: input.imagem,
+    p_agendamento_id: input.agendamentoId ?? null,
+  });
+  if (error) throw erro(error, "Não foi possível registrar a assinatura.");
+  return data as { id: string; assinado_em: string; substituiu: boolean };
+}
+
+// ---------------------------------------------------------------------------
+// Finalização (§39/§40)
+// ---------------------------------------------------------------------------
+
+/** Resumo e requisitos para finalizar, calculados no banco (a mesma regra do "Alterar status"). */
+export async function obterFinalizacaoOs(osId: string): Promise<ResumoFinalizacao> {
+  const { data, error } = await supabase.rpc("finalizacao_os", { p_os_id: osId });
+  if (error) throw erro(error, "Não foi possível carregar o resumo da OS.");
+  return data as ResumoFinalizacao;
+}
+
+/** Versão congelada na finalização (ou a pedida); com a OS aberta, a prévia com os dados atuais. */
+export async function obterRelatorioTecnico(osId: string, versao?: number | null): Promise<LeituraRelatorio> {
+  const { data, error } = await supabase.rpc("relatorio_tecnico_os", { p_os_id: osId, p_versao: versao ?? null });
+  if (error) throw erro(error, "Não foi possível carregar o relatório técnico.");
+  return data as LeituraRelatorio;
 }

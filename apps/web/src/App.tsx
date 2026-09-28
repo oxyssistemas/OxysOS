@@ -10,6 +10,7 @@ import { TelaCarregando } from "./components/TelaCarregando";
 // Cada portal em seu próprio chunk: usuário da empresa não baixa o código do Super Admin e vice-versa
 const AdminApp = lazy(() => import("./admin/AdminApp").then((m) => ({ default: m.AdminApp })));
 const PortalEmpresa = lazy(() => import("./app/PortalEmpresa").then((m) => ({ default: m.PortalEmpresa })));
+const PortalTecnico = lazy(() => import("./technician/PortalTecnico").then((m) => ({ default: m.PortalTecnico })));
 
 export default function App() {
   return (
@@ -33,6 +34,14 @@ export default function App() {
                 element={
                   <RequerSessao>
                     <PortalEmpresa />
+                  </RequerSessao>
+                }
+              />
+              <Route
+                path="/technician/*"
+                element={
+                  <RequerSessao>
+                    <PortalTecnico />
                   </RequerSessao>
                 }
               />

@@ -108,8 +108,10 @@ export interface OrdemDetalhe {
   iniciado_em: string | null;
   observacoes_internas: string | null;
   diagnostico: string | null;
+  causa: string | null;
   servico_executado: string | null;
   solucao: string | null;
+  recomendacao: string | null;
   observacoes_tecnicas: string | null;
   desconto: number;
   valor_total: number;
@@ -134,17 +136,76 @@ export interface ItemOrdem {
   os_id: string;
   tipo: TipoItemOS;
   descricao: string;
+  unidade: string;
   quantidade: number;
   valor_unitario: number;
   subtotal: number;
+  observacao: string | null;
+  /** item do catálogo que originou a linha */
+  catalogo_item_id: string | null;
   criado_em: string;
 }
 
 export interface DadosItemForm {
   tipo: TipoItemOS;
   descricao: string;
+  unidade: string;
   quantidade: string;
   valor_unitario: string;
+  observacao: string;
+  /** "" = item avulso */
+  catalogo_item_id: string;
+}
+
+// ---------------------------------------------------------------------------
+// Catálogo de materiais e serviços (§34 e §35)
+// ---------------------------------------------------------------------------
+
+export interface ItemCatalogo {
+  id: string;
+  tipo: TipoItemOS;
+  codigo: string | null;
+  nome: string;
+  unidade: string;
+  valor_padrao: number;
+  observacao: string | null;
+  ativo: boolean;
+  versao: number;
+  total_uso: number;
+}
+
+export interface DadosItemCatalogoForm {
+  tipo: TipoItemOS;
+  codigo: string;
+  nome: string;
+  unidade: string;
+  valor_padrao: string;
+  observacao: string;
+}
+
+/** Unidades oferecidas no formulário; o campo aceita qualquer texto curto. */
+export const UNIDADES_SUGERIDAS = ["un", "m", "cm", "kg", "g", "l", "h", "cx", "pç", "rolo"];
+
+/** Itens da OS como o portal do técnico enxerga (sem preço quando não pode ver). */
+export interface ItemOsCampo {
+  id: string;
+  tipo: TipoItemOS;
+  descricao: string;
+  unidade: string;
+  quantidade: number;
+  observacao: string | null;
+  catalogo_item_id: string | null;
+  valor_unitario: number | null;
+  subtotal: number | null;
+  criado_em: string;
+  criado_por: string | null;
+  meu: boolean;
+}
+
+export interface ItensOsResposta {
+  pode_lancar: boolean;
+  mostra_valores: boolean;
+  itens: ItemOsCampo[];
 }
 
 /** Como o prazo é definido no formulário. */

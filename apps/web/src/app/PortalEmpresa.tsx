@@ -10,6 +10,7 @@ import { OrdensLayout } from "./ordens/OrdensLayout";
 import { OrdensPage } from "./ordens/OrdensPage";
 import { NovaOrdemPage } from "./ordens/NovaOrdemPage";
 import { OrdemDetalhePage } from "./ordens/OrdemDetalhePage";
+import { RelatorioTecnicoPage } from "./ordens/RelatorioTecnicoPage";
 import { ClientesPage } from "./clientes/ClientesPage";
 import { ClienteDetalhePage } from "./clientes/ClienteDetalhePage";
 import { TecnicosPage } from "./tecnicos/TecnicosPage";
@@ -21,10 +22,13 @@ import { StatusOsPage } from "./configuracoes/StatusOsPage";
 import { PrioridadesPage } from "./configuracoes/PrioridadesPage";
 import { TiposServicoPage } from "./configuracoes/TiposServicoPage";
 import { ChecklistsPage } from "./configuracoes/ChecklistsPage";
+import { CatalogoPage } from "./configuracoes/CatalogoPage";
 import { EquipeLayout } from "./equipe/EquipeLayout";
 import { UsuariosPage } from "./equipe/UsuariosPage";
 import { CargosPage } from "./equipe/CargosPage";
 import { RelatoriosPage } from "./relatorios/RelatoriosPage";
+import { AgendaPage } from "./agenda/AgendaPage";
+import { DespachoPage } from "./despacho/DespachoPage";
 
 /** /app — Portal da Empresa (owner, gerente e equipe). */
 export function PortalEmpresa() {
@@ -77,6 +81,14 @@ export function PortalEmpresa() {
                 </RotaModulo>
               }
             />
+            <Route
+              path="service-orders/:id/report"
+              element={
+                <RotaModulo feature="service_orders" permissao="service_orders.view">
+                  <RelatorioTecnicoPage />
+                </RotaModulo>
+              }
+            />
 
             <Route
               path="customers"
@@ -91,6 +103,24 @@ export function PortalEmpresa() {
               element={
                 <RotaModulo feature="customers" permissao="customers.view">
                   <ClienteDetalhePage />
+                </RotaModulo>
+              }
+            />
+
+            <Route
+              path="calendar"
+              element={
+                <RotaModulo feature="calendar" permissao="calendar.view">
+                  <AgendaPage />
+                </RotaModulo>
+              }
+            />
+
+            <Route
+              path="dispatch"
+              element={
+                <RotaModulo feature="dispatch" permissao="dispatch.view">
+                  <DespachoPage />
                 </RotaModulo>
               }
             />
@@ -169,6 +199,14 @@ export function PortalEmpresa() {
                 element={
                   <RotaModulo feature="service_orders">
                     <PrioridadesPage />
+                  </RotaModulo>
+                }
+              />
+              <Route
+                path="catalog"
+                element={
+                  <RotaModulo feature="service_orders">
+                    <CatalogoPage />
                   </RotaModulo>
                 }
               />
