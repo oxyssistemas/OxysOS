@@ -183,16 +183,23 @@ begin
   end;
   execute 'reset role';
 
-  -- arquivo órfão (sem registro) pode ser apagado por quem enviou; arquivo vinculado não
+  -- O Storage passou a recusar DELETE direto na tabela (gatilho
+  -- protect_objects_delete, do próprio Supabase). A limpeza de arquivo órfão
+  -- do app usa a Storage API (storage.remove), não SQL; o que dá para
+  -- conferir por SQL é que nada é apagado por baixo dela.
   perform set_config('request.jwt.claims', json_build_object('sub', v_owner_a, 'role', 'authenticated')::text, true);
   execute 'set local role authenticated';
-  delete from storage.objects where bucket_id = 'os-anexos' and name = v_caminho_orfao;
-  get diagnostics v_n = row_count;
-  delete from storage.objects where bucket_id = 'os-anexos' and name = v_caminho;
-  get diagnostics v_txt = row_count;
+  select count(*) into v_n from storage.objects
+   where bucket_id = 'os-anexos' and name in (v_caminho, v_caminho_orfao);
+  begin
+    delete from storage.objects where bucket_id = 'os-anexos' and name = v_caminho_orfao;
+    v_txt := 'apagou';
+  exception when insufficient_privilege then
+    v_txt := 'bloqueado';
+  end;
   execute 'reset role';
-  if v_n = 1 and v_txt = '0' then
-    v_ok := v_ok + 1; v_log := v_log || E'\n  ok   arquivo órfão apagável pelo autor; arquivo de anexo preservado';
+  if v_n = 2 and v_txt = 'bloqueado' then
+    v_ok := v_ok + 1; v_log := v_log || E'\n  ok   Storage recusa DELETE direto (limpeza de órfão passa pela Storage API)';
   else v_falhas := v_falhas + 1; v_log := v_log || format(E'\n  FALHA limpeza de órfão: %s / %s', v_n, v_txt); end if;
 
   perform set_config('request.jwt.claims', json_build_object('sub', v_fin_a, 'role', 'authenticated')::text, true);

@@ -2,6 +2,7 @@ import { useLocation } from "react-router-dom";
 import { Menu } from "lucide-react";
 import { useCompany } from "../context/CompanyContext";
 import { tituloDaRota } from "../navegacao";
+import { SinoNotificacoes } from "@/components/notificacoes/SinoNotificacoes";
 
 function diasRestantes(iso: string): number {
   return Math.max(0, Math.ceil((new Date(iso).getTime() - Date.now()) / 86_400_000));
@@ -44,6 +45,7 @@ export function PortalTopbar({ onAbrirMenu }: { onAbrirMenu: () => void }) {
             Plano {subscription.plano.nome}
           </span>
         )}
+        <SinoNotificacoes linkPara={(n) => (n.os_id ? `/app/service-orders/${n.os_id}` : null)} />
         <div
           className="flex h-8 w-8 items-center justify-center rounded-full bg-accent-muted text-sm font-semibold text-accent"
           title={currentUser?.cargo ? `${nome} · ${currentUser.cargo.nome}` : nome}

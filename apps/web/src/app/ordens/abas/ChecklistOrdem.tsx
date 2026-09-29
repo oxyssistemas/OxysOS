@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { Camera, CheckCircle2, ClipboardList, Loader2, Lock, Plus, Trash2 } from "lucide-react";
+import { AlertTriangle, Camera, CheckCircle2, ClipboardList, Loader2, Lock, PenLine, Plus, Trash2 } from "lucide-react";
 import { useToast } from "@oxys/shared/components/Toast";
+import { AssinaturaDialog } from "@/components/AssinaturaDialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { useCompany } from "../../context/CompanyContext";
 import {
@@ -15,14 +16,27 @@ import {
   type ValorRespostaChecklist,
 } from "../execucaoService";
 import { formatarDataHora, type OrdemDetalhe } from "../tipos";
-import { FORMATOS_FOTO, ROTULO_MOMENTO, ehFotoArquivo, validarArquivoAnexo, type AnexoOS, type ChecklistOS, type ItemChecklistOS, type ModeloChecklist } from "../tiposExecucao";
+import {
+  FORMATOS_FOTO,
+  ROTULO_MOMENTO,
+  arquivoDeDataUrl,
+  ehFotoArquivo,
+  faixaEsperada,
+  validarArquivoAnexo,
+  type AnexoOS,
+  type ChecklistOS,
+  type ItemChecklistOS,
+  type ModeloChecklist,
+} from "../tiposExecucao";
 import { MiniaturaFoto, useUrlsAnexos } from "./AnexosOrdem";
 
 interface ChecklistOrdemProps {
   ordem: OrdemDetalhe;
   lojaId: string;
-  /** edição liberada (permissão e OS não encerrada) */
+  /** responder itens (service_orders.edit ou checklists.fill, OS aberta) */
   podeEditar: boolean;
+  /** aplicar e remover checklists (service_orders.edit, OS aberta) */
+  podeAplicar: boolean;
   encerrada: boolean;
 }
 
@@ -44,6 +58,7 @@ function ItemChecklist({ item, podeEditar, fotos, urls, salvando, onResponder, o
   const [texto, setTexto] = useState(item.valor_texto ?? "");
   const [numero, setNumero] = useState(item.valor_numero != null ? String(item.valor_numero) : "");
   const fotoRef = useRef<HTMLInputElement>(null);
+  const [assinando, setAssinando] = useState(false);
 
   useEffect(() => {
     setTexto(item.valor_texto ?? "");
@@ -51,6 +66,8 @@ function ItemChecklist({ item, podeEditar, fotos, urls, salvando, onResponder, o
   }, [item.valor_texto, item.valor_numero]);
 
   const bloqueado = !podeEditar || salvando;
+  const assinatura = item.tipo === "assinatura";
+  const faixa = item.tipo === "medicao" ? faixaEsperada(item) : null;
 
   function salvarTexto() {
     const limpo = texto.trim();
@@ -116,6 +133,37 @@ function ItemChecklist({ item, podeEditar, fotos, urls, salvando, onResponder, o
         />
       );
       break;
+    case "medicao":
+      controle = (
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            id={id}
+            type="text"
+            inputMode="decimal"
+            value={numero}
+            disabled={bloqueado}
+            onChange={(e) => setNumero(e.target.value)}
+            onBlur={salvarNumero}
+            onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
+            className={`${campo} sm:max-w-[10rem]`}
+          />
+          {item.unidade && <span className="text-sm text-text-secondary">{item.unidade}</span>}
+          {faixa && <span className="text-xs text-text-muted">esperado {faixa}</span>}
+        </div>
+      );
+      break;
+    case "hora":
+      controle = (
+        <input
+          id={id}
+          type="time"
+          value={item.valor_hora ? item.valor_hora.slice(0, 5) : ""}
+          disabled={bloqueado}
+          onChange={(e) => onResponder(e.target.value || null)}
+          className={`${campo} sm:max-w-[10rem]`}
+        />
+      );
+      break;
     case "data":
       controle = (
         <input
@@ -141,6 +189,7 @@ function ItemChecklist({ item, podeEditar, fotos, urls, salvando, onResponder, o
       );
       break;
     case "foto":
+    case "assinatura":
       controle = (
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           {item.anexo && (
@@ -163,7 +212,7 @@ function ItemChecklist({ item, podeEditar, fotos, urls, salvando, onResponder, o
                 onChange={(e) => onResponder(e.target.value || null)}
                 className={`${campo} sm:max-w-xs`}
               >
-                <option value="">{fotos.length === 0 ? "Nenhuma foto na OS" : "Escolher foto da OS…"}</option>
+                <option value="">{fotos.length === 0 ? `Nenhuma ${assinatura ? "imagem" : "foto"} na OS` : `Escolher ${assinatura ? "imagem" : "foto"} da OS…`}</option>
                 {fotos.map((f) => (
                   <option key={f.id} value={f.id}>
                     {f.momento ? `${ROTULO_MOMENTO[f.momento]} · ` : ""}
@@ -174,10 +223,11 @@ function ItemChecklist({ item, podeEditar, fotos, urls, salvando, onResponder, o
               <button
                 type="button"
                 disabled={bloqueado}
-                onClick={() => fotoRef.current?.click()}
+                onClick={() => (assinatura ? setAssinando(true) : fotoRef.current?.click())}
                 className="flex items-center justify-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium text-text-secondary hover:bg-white/5 hover:text-text-primary disabled:opacity-50"
               >
-                <Camera size={16} aria-hidden="true" /> Enviar foto
+                {assinatura ? <PenLine size={16} aria-hidden="true" /> : <Camera size={16} aria-hidden="true" />}
+                {assinatura ? (item.anexo ? "Assinar de novo" : "Assinar na tela") : "Enviar foto"}
               </button>
               <input
                 ref={fotoRef}
@@ -192,7 +242,18 @@ function ItemChecklist({ item, podeEditar, fotos, urls, salvando, onResponder, o
               />
             </div>
           )}
-          {!podeEditar && !item.anexo && <span className="text-sm text-text-muted">Sem foto</span>}
+          {!podeEditar && !item.anexo && <span className="text-sm text-text-muted">{assinatura ? "Sem assinatura" : "Sem foto"}</span>}
+          {assinatura && (
+            <AssinaturaDialog
+              aberto={assinando}
+              titulo={item.rotulo}
+              onCancelar={() => setAssinando(false)}
+              onConfirmar={(png) => {
+                setAssinando(false);
+                onEnviarFoto(arquivoDeDataUrl(png, `assinatura-${Date.now()}.png`));
+              }}
+            />
+          )}
         </div>
       );
       break;
@@ -229,14 +290,23 @@ function ItemChecklist({ item, podeEditar, fotos, urls, salvando, onResponder, o
             </p>
           )}
           {!item.respondido_em && salvando && <Loader2 size={12} className="mt-1 animate-spin text-text-muted" aria-label="Salvando" />}
-          {item.anexo?.removido && <p className="mt-1 text-xs text-warning">A foto vinculada foi removida dos arquivos da OS.</p>}
+          {item.fora_faixa && (
+            <p className="mt-1 flex items-center gap-1 text-xs text-amber-300">
+              <AlertTriangle size={12} aria-hidden="true" /> Medição fora da faixa esperada{faixa ? ` (${faixa})` : ""}.
+            </p>
+          )}
+          {item.anexo?.removido && (
+            <p className="mt-1 text-xs text-warning">
+              A {assinatura ? "imagem" : "foto"} vinculada foi removida dos arquivos da OS.
+            </p>
+          )}
         </div>
       </div>
     </li>
   );
 }
 
-export function ChecklistOrdem({ ordem, lojaId, podeEditar, encerrada }: ChecklistOrdemProps) {
+export function ChecklistOrdem({ ordem, lojaId, podeEditar, podeAplicar, encerrada }: ChecklistOrdemProps) {
   const { can } = useCompany();
   const { notificarSucesso, notificarErro } = useToast();
   const [checklists, setChecklists] = useState<ChecklistOS[] | null>(null);
@@ -266,11 +336,11 @@ export function ChecklistOrdem({ ordem, lojaId, podeEditar, encerrada }: Checkli
   }, [carregar]);
 
   useEffect(() => {
-    if (!podeEditar) return;
+    if (!podeAplicar) return;
     listarModelosChecklist()
       .then((m) => setModelos(m.filter((x) => x.ativo)))
       .catch(() => setModelos([]));
-  }, [podeEditar]);
+  }, [podeAplicar]);
 
   const caminhosFotos = [
     ...fotos.map((f) => f.caminho),
@@ -309,7 +379,7 @@ export function ChecklistOrdem({ ordem, lojaId, podeEditar, encerrada }: Checkli
       const r = await responderItem(item.id, valor);
       if (r.checklist_completo) {
         const checklist = checklists?.find((c) => c.itens.some((i) => i.id === item.id));
-        const estavaCompleto = checklist?.itens.every((i) => i.respondido);
+        const estavaCompleto = checklist?.itens.every((i) => i.respondido || !i.visivel);
         if (!estavaCompleto) notificarSucesso("Checklist completo.");
       }
       await carregar();
@@ -325,14 +395,14 @@ export function ChecklistOrdem({ ordem, lojaId, podeEditar, encerrada }: Checkli
   async function enviarFoto(item: ItemChecklistOS, arquivo: File) {
     const invalido = validarArquivoAnexo(arquivo);
     if (invalido || !ehFotoArquivo(arquivo)) {
-      notificarErro(invalido ?? "Envie uma foto.");
+      notificarErro(invalido ?? "Envie uma imagem.");
       return;
     }
     setSalvandoItem(item.id);
     try {
       const anexoId = await enviarAnexo({ lojaId, osId: ordem.id, arquivo, momento: "durante", descricao: item.rotulo });
       await responderItem(item.id, anexoId);
-      notificarSucesso("Foto anexada ao item.");
+      notificarSucesso(item.tipo === "assinatura" ? "Assinatura anexada ao item." : "Foto anexada ao item.");
       await carregar();
     } catch (err) {
       notificarErro(err instanceof Error ? err.message : "Não foi possível enviar a foto.");
@@ -376,7 +446,7 @@ export function ChecklistOrdem({ ordem, lojaId, podeEditar, encerrada }: Checkli
         </p>
       )}
 
-      {podeEditar && (
+      {podeAplicar && (
         <section className="rounded-xl border border-border bg-panel p-4" aria-label="Aplicar checklist">
           {modelos.length === 0 ? (
             <p className="text-sm text-text-secondary">
@@ -424,28 +494,30 @@ export function ChecklistOrdem({ ordem, lojaId, podeEditar, encerrada }: Checkli
           <ClipboardList size={22} className="mx-auto text-text-muted" aria-hidden="true" />
           <p className="mt-2 font-display text-sm font-medium text-text-primary">Nenhum checklist nesta OS</p>
           <p className="mx-auto mt-1 max-w-sm text-sm text-text-secondary">
-            {podeEditar ? "Aplique um modelo para registrar as verificações do atendimento." : "Nenhuma verificação foi registrada."}
+            {podeAplicar ? "Aplique um modelo para registrar as verificações do atendimento." : "Nenhuma verificação foi registrada."}
           </p>
         </div>
       ) : (
         checklists.map((c) => {
-          const respondidos = c.itens.filter((i) => i.respondido).length;
-          const pendentesObrigatorios = c.itens.filter((i) => i.obrigatorio && !i.respondido).length;
+          // item condicional escondido não aparece, não conta e não é exigido (§28)
+          const visiveis = c.itens.filter((i) => i.visivel);
+          const escondidos = c.itens.length - visiveis.length;
+          const respondidos = visiveis.filter((i) => i.respondido).length;
           const semRespostas = c.itens.every((i) => !i.respondido_em);
-          const pct = c.itens.length ? Math.round((respondidos / c.itens.length) * 100) : 0;
+          const pct = visiveis.length ? Math.round((respondidos / visiveis.length) * 100) : 0;
           return (
             <section key={c.id} className="rounded-xl border border-border bg-panel p-5" aria-labelledby={`checklist-${c.id}`}>
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <h2 id={`checklist-${c.id}`} className="flex items-center gap-2 font-display text-sm font-semibold text-text-primary">
                     {c.nome}
-                    {respondidos === c.itens.length && <CheckCircle2 size={16} className="text-success" aria-label="Completo" />}
+                    {respondidos === visiveis.length && <CheckCircle2 size={16} className="text-success" aria-label="Completo" />}
                   </h2>
                   <p className="text-xs text-text-muted">
                     Aplicado por {c.aplicado_por ?? "—"} em {formatarDataHora(c.aplicado_em)}
                   </p>
                 </div>
-                {podeEditar && semRespostas && (
+                {podeAplicar && semRespostas && (
                   <button
                     onClick={() => setRemover(c)}
                     className="rounded-lg p-2 text-text-muted hover:bg-white/5 hover:text-danger"
@@ -458,11 +530,12 @@ export function ChecklistOrdem({ ordem, lojaId, podeEditar, encerrada }: Checkli
               <div className="mt-3">
                 <div className="flex justify-between text-xs text-text-secondary">
                   <span>
-                    {respondidos} de {c.itens.length} respondidos
+                    {respondidos} de {visiveis.length} respondidos
+                    {escondidos > 0 && ` · ${escondidos} ${escondidos === 1 ? "item depende" : "itens dependem"} de outra resposta`}
                   </span>
-                  {pendentesObrigatorios > 0 && (
+                  {c.pendentes > 0 && (
                     <span className="text-warning">
-                      {pendentesObrigatorios} obrigatório{pendentesObrigatorios > 1 ? "s" : ""} pendente{pendentesObrigatorios > 1 ? "s" : ""}
+                      {c.pendentes} obrigatório{c.pendentes > 1 ? "s" : ""} pendente{c.pendentes > 1 ? "s" : ""}
                     </span>
                   )}
                 </div>
@@ -478,7 +551,7 @@ export function ChecklistOrdem({ ordem, lojaId, podeEditar, encerrada }: Checkli
                 </div>
               </div>
               <ul className="mt-2 divide-y divide-border">
-                {c.itens.map((item) => (
+                {visiveis.map((item) => (
                   <ItemChecklist
                     key={item.id}
                     item={item}

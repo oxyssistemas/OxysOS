@@ -1,6 +1,7 @@
 import {
   BarChart3,
   CalendarDays,
+  Radio,
   ClipboardList,
   FileSignature,
   HardDrive,
@@ -56,7 +57,20 @@ export const SECOES_NAVEGACAO: SecaoNavegacao[] = [
         permissao: "technicians.view",
       },
       { rota: "/app/assets", label: "Equipamentos", icone: HardDrive, feature: "assets", permissao: "assets.view" },
-      { rota: "/app/calendar", label: "Agenda", icone: CalendarDays, feature: "calendar", emBreve: true },
+      {
+        rota: "/app/calendar",
+        label: "Agenda",
+        icone: CalendarDays,
+        feature: "calendar",
+        permissao: "calendar.view",
+      },
+      {
+        rota: "/app/dispatch",
+        label: "Central de Despacho",
+        icone: Radio,
+        feature: "dispatch",
+        permissao: "dispatch.view",
+      },
       // Orçamentos ainda não tem feature no catálogo: só aparecerá quando existir
     ],
   },

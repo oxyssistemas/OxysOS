@@ -53,6 +53,7 @@ export function AnexosOrdem({ osId, lojaId, podeEditar }: AnexosOrdemProps) {
   const [anexos, setAnexos] = useState<AnexoOS[] | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [momento, setMomento] = useState<MomentoFoto | "">("durante");
+  const [descricao, setDescricao] = useState("");
   const [envio, setEnvio] = useState<{ atual: number; total: number } | null>(null);
   const [filtro, setFiltro] = useState<FiltroFotos>("todas");
   const [remover, setRemover] = useState<AnexoOS | null>(null);
@@ -97,7 +98,7 @@ export function AnexosOrdem({ osId, lojaId, podeEditar }: AnexosOrdemProps) {
         continue;
       }
       try {
-        await enviarAnexo({ lojaId, osId, arquivo, momento: momento || null });
+        await enviarAnexo({ lojaId, osId, arquivo, momento: momento || null, descricao });
         enviados++;
       } catch (err) {
         falhas.push(`${arquivo.name}: ${err instanceof Error ? err.message : "falha no envio."}`);
@@ -106,7 +107,10 @@ export function AnexosOrdem({ osId, lojaId, podeEditar }: AnexosOrdemProps) {
     setEnvio(null);
     if (arquivosRef.current) arquivosRef.current.value = "";
     if (cameraRef.current) cameraRef.current.value = "";
-    if (enviados > 0) notificarSucesso(enviados === 1 ? "Arquivo anexado." : `${enviados} arquivos anexados.`);
+    if (enviados > 0) {
+      notificarSucesso(enviados === 1 ? "Arquivo anexado." : `${enviados} arquivos anexados.`);
+      setDescricao("");
+    }
     if (falhas.length > 0) notificarErro(falhas.slice(0, 3).join(" "));
     if (enviados > 0) await carregar();
   }
@@ -154,7 +158,7 @@ export function AnexosOrdem({ osId, lojaId, podeEditar }: AnexosOrdemProps) {
         <section className="rounded-xl border border-border bg-panel p-4" aria-label="Enviar arquivos">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
             <label className="flex flex-col gap-1.5 text-xs text-text-muted" htmlFor="momento-foto">
-              Momento das fotos
+              Categoria das fotos
               <select
                 id="momento-foto"
                 value={momento}
@@ -168,6 +172,17 @@ export function AnexosOrdem({ osId, lojaId, podeEditar }: AnexosOrdemProps) {
                 ))}
                 <option value="">Não informar</option>
               </select>
+            </label>
+            <label className="flex flex-1 flex-col gap-1.5 text-xs text-text-muted" htmlFor="descricao-anexo">
+              Descrição (opcional)
+              <input
+                id="descricao-anexo"
+                value={descricao}
+                maxLength={500}
+                placeholder="O que esta evidência mostra"
+                onChange={(e) => setDescricao(e.target.value)}
+                className="rounded-lg border border-border bg-base px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-accent"
+              />
             </label>
             <div className="flex flex-wrap gap-2">
               <button
@@ -193,6 +208,7 @@ export function AnexosOrdem({ osId, lojaId, podeEditar }: AnexosOrdemProps) {
           </div>
           <p className="mt-3 text-xs text-text-muted">
             Fotos JPG, PNG, WEBP ou HEIC até 10 MB · documentos PDF, Word, Excel, TXT ou CSV até 20 MB · até 10 por envio.
+            Fotos grandes são reduzidas para 2048 px antes de subir, mantendo a leitura de etiquetas e danos.
           </p>
         </section>
       )}
@@ -203,7 +219,7 @@ export function AnexosOrdem({ osId, lojaId, podeEditar }: AnexosOrdemProps) {
             Fotos {anexos && <span className="font-normal text-text-muted">({fotos.length})</span>}
           </h2>
           {fotos.length > 0 && (
-            <div className="flex flex-wrap gap-1" role="group" aria-label="Filtrar fotos por momento">
+            <div className="flex flex-wrap gap-1" role="group" aria-label="Filtrar fotos por categoria">
               {(["todas", ...MOMENTOS_FOTO.map((m) => m.valor)] as FiltroFotos[]).map((f) => (
                 <button
                   key={f}
@@ -227,7 +243,7 @@ export function AnexosOrdem({ osId, lojaId, podeEditar }: AnexosOrdemProps) {
           </div>
         ) : fotosFiltradas.length === 0 ? (
           <p className="py-8 text-center text-sm text-text-muted">
-            {fotos.length === 0 ? "Nenhuma foto anexada." : "Nenhuma foto neste momento."}
+            {fotos.length === 0 ? "Nenhuma foto anexada." : "Nenhuma foto nesta categoria."}
           </p>
         ) : (
           <ul className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
@@ -248,7 +264,15 @@ export function AnexosOrdem({ osId, lojaId, podeEditar }: AnexosOrdemProps) {
                       {foto.momento ? `${ROTULO_MOMENTO[foto.momento]} · ` : ""}
                       {formatarDataHora(foto.criado_em)}
                     </p>
-                    <p className="truncate text-xs text-text-muted">{foto.enviado_por ?? "—"}</p>
+                    <p className="truncate text-xs text-text-muted" title={foto.tecnico ?? foto.enviado_por ?? ""}>
+                      {foto.tecnico ?? foto.enviado_por ?? "—"}
+                      {foto.tecnico && " · em campo"}
+                    </p>
+                    {foto.descricao && (
+                      <p className="truncate text-xs text-text-secondary" title={foto.descricao}>
+                        {foto.descricao}
+                      </p>
+                    )}
                   </div>
                   {podeEditar && (
                     <button

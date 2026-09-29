@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@oxys/shared/supabase";
+import { apagarDadosDoAparelho } from "@/technician/offline/estado";
 
 export type PapelUsuario = "super_admin" | "gerente" | "funcionario";
 
@@ -87,6 +88,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function sair() {
+    // nada do atendimento fica no aparelho depois de sair (§50)
+    await apagarDadosDoAparelho().catch(() => undefined);
     await supabase.auth.signOut();
   }
 

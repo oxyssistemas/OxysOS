@@ -83,3 +83,81 @@ export function tecnicoFormVazio(): DadosTecnicoForm {
 export function nomeCompleto(t: { nome: string; sobrenome: string | null }): string {
   return [t.nome, t.sobrenome].filter(Boolean).join(" ");
 }
+
+// ---------------------------------------------------------------------------
+// Equipes (fase 3 · etapa 3)
+// ---------------------------------------------------------------------------
+
+export interface MembroEquipe {
+  tecnico_id: string;
+  nome: string;
+  ativo: boolean;
+  lider: boolean;
+}
+
+export interface Equipe {
+  id: string;
+  nome: string;
+  descricao: string | null;
+  cor: string;
+  ativo: boolean;
+  versao: number;
+  membros: MembroEquipe[];
+  /** OS que ainda não foram finalizadas nem canceladas */
+  os_abertas: number;
+}
+
+export interface DadosEquipeForm {
+  nome: string;
+  descricao: string;
+  cor: string;
+  membros: { tecnico_id: string; lider: boolean }[];
+}
+
+/** Paleta das equipes: as mesmas cores usadas nos gráficos e status do portal. */
+export const CORES_EQUIPE = ["#1565FF", "#D95926", "#1D9E75", "#8B5CF6", "#E4B200", "#E5484D"] as const;
+
+export function equipeFormVazia(): DadosEquipeForm {
+  return { nome: "", descricao: "", cor: CORES_EQUIPE[0], membros: [] };
+}
+
+// ---------------------------------------------------------------------------
+// Disponibilidade (jornada semanal + ausências)
+// ---------------------------------------------------------------------------
+
+export interface TurnoJornada {
+  /** 0 = domingo … 6 = sábado */
+  dia_semana: number;
+  inicio: string;
+  fim: string;
+}
+
+export type MotivoAusencia = "folga" | "ferias" | "atestado" | "treinamento" | "bloqueio" | "outro";
+
+export interface Ausencia {
+  id: string;
+  motivo: MotivoAusencia;
+  inicio_em: string;
+  fim_em: string;
+  observacao: string | null;
+}
+
+export interface Disponibilidade {
+  jornada: (TurnoJornada & { id: string })[];
+  ausencias: Ausencia[];
+}
+
+export const DIAS_SEMANA = ["Domingo", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"] as const;
+
+export const MOTIVOS_AUSENCIA: { valor: MotivoAusencia; rotulo: string }[] = [
+  { valor: "folga", rotulo: "Folga" },
+  { valor: "ferias", rotulo: "Férias" },
+  { valor: "atestado", rotulo: "Atestado" },
+  { valor: "treinamento", rotulo: "Treinamento" },
+  { valor: "bloqueio", rotulo: "Bloqueio de agenda" },
+  { valor: "outro", rotulo: "Outro" },
+];
+
+export function rotuloMotivo(motivo: MotivoAusencia): string {
+  return MOTIVOS_AUSENCIA.find((m) => m.valor === motivo)?.rotulo ?? "Ausência";
+}

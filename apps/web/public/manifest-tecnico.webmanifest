@@ -1,0 +1,18 @@
+{
+  "id": "/technician",
+  "name": "Oxys OS — Portal do Técnico",
+  "short_name": "Oxys Campo",
+  "description": "Agenda, atendimento, checklist, fotos e assinatura em campo.",
+  "lang": "pt-BR",
+  "start_url": "/technician",
+  "scope": "/technician",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0D0D0D",
+  "theme_color": "#0D0D0D",
+  "icons": [
+    { "src": "/icons/tecnico-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/tecnico-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/tecnico-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

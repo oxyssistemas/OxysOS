@@ -286,15 +286,24 @@ begin
 
   -- ================= Anônimo =================
   perform set_config('request.jwt.claims', json_build_object('role', 'anon')::text, true);
-  execute 'set local role anon';
-  select count(*) into v_n from public.clientes;
+  -- fase3_33: anon perdeu até o grant nas tabelas (antes lia 0 linhas pela RLS; agora é negado)
+  begin
+    execute 'set local role anon';
+    select count(*) into v_n from public.clientes;
+  exception when insufficient_privilege then
+    v_n := 0;
+  end;
   execute 'reset role';
   if v_n = 0 then v_ok := v_ok + 1; v_log := v_log || E'\n  ok   anônimo não lê clientes';
   else v_falhas := v_falhas + 1; v_log := v_log || E'\n  FALHA anônimo lê clientes'; end if;
 
-  execute 'set local role anon';
-  select count(*) into v_n from public.usuarios;
-  select count(*) + v_n into v_n from public.lojas;
+  begin
+    execute 'set local role anon';
+    select count(*) into v_n from public.usuarios;
+    select count(*) + v_n into v_n from public.lojas;
+  exception when insufficient_privilege then
+    v_n := 0;
+  end;
   execute 'reset role';
   if v_n = 0 then v_ok := v_ok + 1; v_log := v_log || E'\n  ok   anônimo não lê usuários nem empresas';
   else v_falhas := v_falhas + 1; v_log := v_log || format(E'\n  FALHA anônimo lê %s registros de usuários/empresas', v_n); end if;

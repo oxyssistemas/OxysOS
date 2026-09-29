@@ -76,9 +76,26 @@ e desfaz tudo ao final. Resultado esperado: `TOTAL: 29 ok, 0 falhas`.
 | `supabase/tests/fase2_08_os_local_atendimento.sql` | 7 |
 | `supabase/tests/fase2_10_tipos_servico_workflow.sql` | 38 |
 | `supabase/tests/fase2_12_ordens_servico.sql` | 28 |
-| `supabase/tests/fase2_16_timeline_anexos_checklist.sql` | 39 |
+| `supabase/tests/fase2_16_timeline_anexos_checklist.sql` | 40 |
 | `supabase/tests/fase2_19_equipe_permissoes.sql` | 30 |
 | `supabase/tests/fase2_20_relatorios.sql` | 17 |
+| `supabase/tests/fase3_01_equipes_disponibilidade.sql` | 24 |
+| `supabase/tests/fase3_02_agenda.sql` | 17 |
+| `supabase/tests/fase3_03_agendamento_conflitos.sql` | 28 |
+| `supabase/tests/fase3_04_central_despacho.sql` | 17 |
+| `supabase/tests/fase3_05_portal_tecnico_acesso.sql` | 14 |
+| `supabase/tests/fase3_06_agenda_tecnico.sql` | 14 |
+| `supabase/tests/fase3_07_fluxo_campo.sql` | 20 |
+| `supabase/tests/fase3_08_apontamento_horas.sql` | 30 |
+| `supabase/tests/fase3_09_checklist_avancado.sql` | 31 |
+| `supabase/tests/fase3_10_evidencias.sql` | 14 |
+| `supabase/tests/fase3_11_materiais_servicos.sql` | 20 |
+| `supabase/tests/fase3_12_assinatura_cliente.sql` | 21 |
+| `supabase/tests/fase3_13_finalizacao_os.sql` | 24 |
+| `supabase/tests/fase3_14_relatorio_tecnico.sql` | 17 |
+| `supabase/tests/fase3_15_notificacoes.sql` | 15 |
+| `supabase/tests/fase3_16_sincronizacao_offline.sql` | 16 |
+| `supabase/tests/fase3_17_seguranca.sql` | 19 |
 
 ### Auditoria final (fase 2 · etapa 15)
 
@@ -162,6 +179,347 @@ Revisão de ponta a ponta ao fechar a fase, com a bateria de testes inteira reex
   usuário não tem a permissão) — a tela simplesmente não mostra a seção.
 - Nenhum indicador é inventado: tudo sai de dados que a fase 2 já registra.
 
+## Portal do Técnico (`/technician`, fase 3 · etapa 7)
+
+Portal de campo separado do `/app`: uma coluna, alvos grandes e navegação fixa embaixo
+(Início, Agenda, Atendimentos, Perfil). Mesma identidade escura, sem a barra lateral
+administrativa.
+
+- **Quem entra é decidido no banco.** `destino_inicial()` devolve `admin`, `technician` ou
+  `app` e o `/` redireciona por ela; `contexto_tecnico()` devolve `liberado` ou o motivo do
+  bloqueio (`sem_feature`, `sem_tecnico`, `sem_permissao`, `sem_acesso`). Para entrar é
+  preciso: feature `technician_portal` (Pro para cima), permissão `technician.jobs.view` e
+  estar vinculado a um **técnico ativo** da empresa — técnico desativado ou cargo sem a
+  permissão perde o portal na hora.
+- Uma chamada monta o portal: técnico, empresa, cargo, especialidades, equipes, jornada,
+  permissões de campo e se o mesmo login também abre o `/app`.
+- **Home** (`home_tecnico`): saudação, o dia em números (atendimentos, prioridade alta,
+  concluídos, aviso de atendimento em andamento), o próximo atendimento com horário,
+  cliente, local, tipo, status e prioridade, e quantos vêm nos próximos 7 dias.
+- O técnico enxerga **os atendimentos dele e os das equipes de que participa** — nunca os de
+  outro técnico (decisão do usuário, aplicada dentro das funções).
+- Perfil: dados de acesso, especialidades, equipes, jornada (leitura — quem ajusta é a
+  empresa), atalho para o `/app` quando o cargo permite, e sair.
+### Agenda e atendimento no portal (fase 3 · etapa 8)
+
+- **Agenda** (`agenda_tecnico`): abas **Hoje**, **Próximos** e **Concluídos** (30 dias). Cada
+  cartão traz horário, cliente, endereço, tipo de serviço, prioridade e status, mais a marca
+  de quando o atendimento veio pela equipe.
+- **Atendimento** (`atendimento_tecnico`, rota `/technician/jobs/:id`): OS e número, o que o
+  cliente relatou, objeto, contato com botão de ligar, endereço completo com **Ver rota**
+  (abre o app de mapas do celular — a fase não tem roteirização própria) e o equipamento com
+  marca, modelo, número de série e localização. A observação do agendamento ("levar escada")
+  aparece no topo.
+- **Nada de dinheiro no campo**: valor, desconto e itens da OS não são enviados ao portal.
+  Telefone e e-mail do cliente só vão para quem tem `customers.view`.
+- A aba **Atendimentos** abre direto o que está em andamento (ou o próximo da fila) por
+  `atendimento_atual_tecnico`.
+- Cada função confere de novo que o atendimento é do técnico ou de uma equipe dele; de outro
+  técnico ou de outra empresa devolve "não encontrado".
+### Fluxo de campo (fase 3 · etapa 9)
+
+- `agendamentos.estado_campo` guarda onde o atendimento está: `nao_iniciado` →
+  `em_deslocamento` → `no_local` → `em_atendimento` ⇄ `pausado` → `finalizado` (etapa 15).
+- **Máquina de estados no servidor** (`registrar_passo_campo`, função interna sem execute para
+  ninguém; o portal chama `iniciar_deslocamento`, `registrar_chegada`,
+  `iniciar_atendimento_campo`, `pausar_atendimento` e `retomar_atendimento`). Cada passo
+  confere permissão do cargo (`technician.jobs.start` / `technician.jobs.pause`), se o
+  atendimento é do técnico (ou de uma equipe dele) e se a transição é válida — pausar sem ter
+  começado, retomar sem estar pausado ou repetir o deslocamento são recusados.
+- **Apontamentos de tempo** (`os_apontamentos`, §26) com tipo `deslocamento`, `atendimento` e
+  `pausa`, motivo da pausa (almoço, aguardando cliente, aguardando peça, problema técnico,
+  outro) e observação. O relógio é o do banco: cada passo fecha o anterior e abre o próximo, e
+  um índice único garante **um único apontamento aberto por técnico**. Pausar fecha o trecho
+  de trabalho e retomar abre outro, então o tempo efetivo é a soma dos trechos de atendimento.
+- Tudo entra na linha do tempo da OS: `os_deslocamento_iniciado`, `os_tecnico_chegou`,
+  `os_atendimento_iniciado`, `os_atendimento_pausado` e `os_atendimento_retomado`.
+- A **central de despacho** passou a mostrar *Em deslocamento* e *Pausa* de verdade: a situação
+  do técnico é lida do que ele registrou em campo, com as regras anteriores (ausência, agenda,
+  jornada) como segundo critério.
+- No portal: botões grandes com o próximo passo possível, cronômetro do relógio aberto
+  ("Atendendo há 42 min"), folha de motivos ao pausar e os tempos somados por tipo. O botão
+  "Finalizar atendimento" leva à tela de finalização (etapa 15).
+
+### Apontamento de horas (fase 3 · etapa 10)
+
+- `os_apontamentos` ganhou `duracao_min` (coluna gerada, nula enquanto o trecho está aberto),
+  `origem` (`automatico` = relógio de campo, `manual` = lançado ou corrigido por alguém) e a
+  auditoria `atualizado_em` / `atualizado_por`.
+- **Nada de tempo sobreposto**: uma constraint de exclusão (`gist` sobre técnico +
+  `tstzrange(inicio_em, fim_em)`) impede que o mesmo técnico tenha dois trechos no mesmo
+  instante, inclusive por INSERT direto. Dois técnicos no mesmo horário continuam válidos.
+- Escrita só pelas funções `lancar_apontamento`, `lancar_apontamento_tecnico`,
+  `ajustar_apontamento` e `excluir_apontamento`. Elas conferem: **gestor** com a permissão nova
+  `service_orders.manage_time` (cargos Proprietário e Gerente) **ou** o **próprio técnico** com
+  `technician.jobs.start` no apontamento dele — ninguém mexe na hora de outro técnico. OS
+  encerrada não recebe nem corrige hora (reabra a OS).
+- Regras do intervalo, todas no servidor (§26 — o navegador nunca informa duração): fim depois
+  do início, nada no futuro, no máximo 24 horas, nada com mais de 180 dias, motivo obrigatório
+  só em pausa e nenhuma sobreposição. Corrigir o apontamento que está correndo com o fim em
+  branco mantém o relógio aberto.
+- Consulta: `horas_os(os)` devolve totais (deslocamento, atendimento, pausa e trabalhado),
+  rateio por técnico e a lista de trechos (`service_orders.view`); `horas_atendimento(agendamento)`
+  faz o mesmo para o portal do técnico. O trecho aberto conta até agora.
+- Interface: aba **Horas** no detalhe da OS (totais, rateio por técnico, lista com
+  "correndo agora" / "lançamento manual" / "corrigido", painel para lançar e corrigir) e a tela
+  **Minhas horas** no portal do técnico (`/technician/jobs/:id/horas`), para lançar o tempo
+  esquecido e ajustar o próprio.
+- Linha do tempo: `os_hora_lancada`, `os_hora_ajustada` e `os_hora_removida`, com tipo, período
+  e duração. Os passos de campo da etapa 9 também ganharam texto próprio (antes caíam no
+  genérico "registrou uma alteração") e há o filtro **Campo e horas**.
+
+### Checklist avançado (fase 3 · etapa 11)
+
+- Três tipos novos de item, do plano Pro para cima (feature `advanced_checklists`): **hora**,
+  **medição** (com unidade e faixa esperada) e **assinatura**. Os seis tipos antigos seguem em
+  qualquer plano.
+- **Medição**: a leitura é sempre gravada; fora da faixa o item volta com `fora_faixa` e a tela
+  avisa — não bloqueia, porque a medição real é o dado.
+- **Item condicional** (§28): `depende_de_ordem` + `condicao_valor` no item. Ele aparece só
+  quando o item anterior (caixa de seleção ou lista) responder o valor combinado. Como a
+  condição olha a resposta do irmão, um item que depende de outro escondido também some — o
+  encadeamento sai de graça, sem engine. Item escondido **não é exigido na finalização**, não
+  aceita resposta e **perde a resposta** se a condição deixar de valer.
+- O banco valida a condição ao salvar o modelo: só aponta para um item **acima**, só sobre
+  caixa de seleção ou lista, e só com um valor que aquele item possa ter.
+- Responder o checklist passa a aceitar **`checklists.fill`** além de `service_orders.edit` —
+  é a permissão que o cargo de campo usa (aplicar e remover checklist seguem com
+  `service_orders.edit`).
+- `checklists_os` devolve `visivel`, `fora_faixa` e `pendentes` (obrigatórios visíveis em
+  aberto); `item_checklist_visivel`, `item_checklist_pendente` e `item_checklist_fora_faixa`
+  ficam fora da API (só são chamadas de dentro das funções `security definer`).
+- Configurações › Checklists: campos de unidade e faixa na medição, seletor
+  "Mostrar só quando … for …" por item, e **modelos prontos por segmento** (§29 e §30) — CFTV,
+  alarme, controle de acesso, split, higienização, preventiva, computador, rede, servidor e
+  visita técnica. Nada é criado sozinho: a sugestão só entra no banco quando alguém clica.
+- Portal do técnico: tela **Checklist** do atendimento (`/technician/jobs/:id/checklist`) com
+  os controles em alvo grande, foto pela câmera do aparelho e o mesmo cálculo de pendências.
+- O item de assinatura grava uma imagem anexada à OS; desde a etapa 14 ela é colhida na
+  própria tela (ver "Assinatura e confirmação do cliente").
+
+### Fotos e evidências (fase 3 · etapa 12)
+
+- As categorias de foto passaram de três para as seis do §31: **antes, durante, depois,
+  problema, equipamento e outros**. A coluna continua se chamando `momento` (o enum é
+  `momento_foto_os`); na interface ela aparece como *Categoria*.
+- Cada evidência guarda OS, **técnico**, data/hora, categoria e descrição (§32). O
+  `os_anexos.tecnico_id` é preenchido pelo servidor a partir do login (`tecnico_do_usuario()`)
+  — o que o cliente mandar nesse campo é ignorado, e quem não é técnico fica sem autoria de
+  campo.
+- **`attachments.upload`** passou a valer de verdade: com ela o cargo de campo envia arquivo
+  (no Storage e na tabela) sem precisar de `service_orders.edit`, e remove **o que ele mesmo
+  enviou**. Quem edita a OS remove qualquer evidência; a remoção continua lógica.
+- **Compressão no aparelho** (§33, `apps/web/src/lib/imagem.ts`): foto acima de 700 KB é
+  redesenhada até 2048 px no lado maior com qualidade 0,85 antes de subir — o suficiente para
+  ler etiqueta, número de série e dano. O arquivo original é mantido quando o formato não abre
+  no navegador (HEIC), quando já é pequeno ou quando a compressão não reduziria nada.
+- `anexos_os` devolve categoria, técnico, autor e `meu` (enviado pelo usuário logado), que é o
+  que a galeria usa para decidir o botão de remover.
+- Portal do técnico: tela **Fotos e evidências** (`/technician/jobs/:id/fotos`) com *Tirar
+  foto* (câmera do aparelho) e *Enviar*, categoria em botões grandes, descrição opcional e a
+  galeria agrupada por categoria. Na aba Arquivos da OS entraram as categorias novas, a
+  descrição no envio e a autoria de campo em cada foto.
+
+### Materiais e serviços (fase 3 · etapa 13)
+
+- **Catálogo da empresa** (`catalogo_itens`, Configurações › Materiais e serviços): tipo, nome,
+  unidade, valor padrão, código opcional e observação. É o "catálogo existente" do §35 — **não
+  é estoque**: não tem saldo, entrada nem baixa (§65). Nome único por tipo (acento e caixa não
+  contam) e código único na empresa. Item já usado em OS é desativado, não excluído.
+- O item da OS ganhou `unidade`, `observacao` e `catalogo_item_id`. Escolher do catálogo faz o
+  banco copiar tipo, nome e unidade para a linha — o que o cliente mandar nesses campos é
+  ignorado, e o item continua coerente mesmo que o catálogo mude depois. Esse vínculo é o
+  ponto de encaixe da futura baixa de estoque (§34).
+- **`service_orders.add_material`** passou a valer: com ela o cargo de campo lança item e
+  ajusta/remove **o que ele mesmo registrou**, sem `service_orders.edit`. E quem não edita a OS
+  **não define preço**: o valor vem do catálogo, ou fica zero no item avulso.
+- `itens_os(os)` devolve a lista com `pode_lancar` e `mostra_valores` — o técnico vê o que usou,
+  com unidade e observação, mas sem preço, que é assunto de quem edita a OS.
+- Na OS: seletor do catálogo no painel de item (com tipo/descrição/unidade travados quando vem
+  de lá), coluna de quantidade com unidade e a observação abaixo da descrição. No portal do
+  técnico, a tela **Materiais e serviços** (`/technician/jobs/:id/materiais`).
+- A linha do tempo do item agora leva unidade e observação junto de quantidade e subtotal.
+
+### Assinatura e confirmação do cliente (fase 3 · etapa 14)
+
+- **Quadro de assinatura por toque** (`components/AssinaturaTouch.tsx`): Pointer Events (dedo,
+  caneta e mouse), `touch-action: none` para a página não rolar enquanto assina, traço nítido
+  em tela retina e fundo branco. Traço curto (< 40 px) conta como toque sem querer. A imagem
+  é recortada na tinta e limitada a 900 px de largura antes de sair do aparelho.
+- **Confirmação do cliente** (`os_assinaturas`, §37/§38): nome de quem acompanhou, documento
+  e observações opcionais e o PNG. Só se grava por `registrar_assinatura_os`, que exige
+  `service_orders.sign`, trava a OS, recusa OS encerrada ("a assinatura é colhida antes de
+  finalizar"), confere que o atendimento é daquela OS e que a imagem é **PNG de verdade**
+  (assinatura dos bytes, não só o prefixo), calcula o **SHA-256** no servidor e usa o relógio
+  do banco. A tabela não tem política de escrita: nem o dono grava direto.
+- Uma assinatura válida por OS (índice único parcial). Colher de novo marca a anterior como
+  substituída (quem e quando) — ela fica no histórico, sem imagem na listagem.
+- `assinatura_os(os)` devolve a atual, o histórico e `pode_assinar`; a linha do tempo mostra
+  "colheu a assinatura de …" (filtro "Campo e horas").
+- Na OS, aba Atendimento: cartão **Confirmação do cliente** com a assinatura, a impressão
+  digital e o botão para colher no balcão. No portal do técnico, a tela **Assinatura do
+  cliente** (`/technician/jobs/:id/assinatura`), pensada para entregar o aparelho ao cliente.
+- O item de checklist do tipo **assinatura** passou a abrir o mesmo quadro (janela
+  `AssinaturaDialog`); o PNG vira anexo da OS e é vinculado ao item, como uma foto.
+
+### Finalização da OS (fase 3 · etapa 15)
+
+- **Requisitos configurados por tipo de serviço** (§39, Configurações › Tipos de serviço →
+  "Para finalizar a OS"): diagnóstico preenchido, assinatura do cliente, materiais registrados
+  e um mínimo de fotos (0–20). O checklist obrigatório vale sempre; OS sem tipo só exige o
+  checklist. Tudo desligado por padrão, então as empresas existentes não mudam de comportamento.
+- **Uma regra só** (§20): `requisitos_finalizacao_os` decide o que falta e `efetivar_status_os`
+  troca o status. Os dois caminhos passam por elas — "Alterar status/Finalizar" no Portal da
+  Empresa (`alterar_status_os`) e "Finalizar atendimento" no portal do técnico
+  (`finalizar_atendimento_campo`). A recusa diz exatamente o que falta ("Antes de finalizar:
+  preencha o diagnóstico; colha a assinatura do cliente."). Os helpers ficam fora da API.
+- **Finalizar em campo** exige `technician.jobs.complete`, o atendimento do próprio técnico (ou da
+  equipe) e que ele tenha começado: não se finaliza o que está "não iniciado", "em deslocamento"
+  ou "no local". Duas saídas: **Serviço concluído** (valida os requisitos e leva a OS ao status
+  de finalização da empresa) ou **Volto outro dia** (fecha só a visita e o relógio; a OS segue
+  aberta — o retorno é um novo agendamento).
+- Ao finalizar a OS por qualquer caminho, relógios ainda abertos dela são fechados e visitas
+  pendentes são concluídas; cancelar fecha os relógios.
+- **Diagnóstico em campo** (§36): a OS ganhou `causa` e `recomendacao`, e o técnico preenche
+  diagnóstico, causa, serviço executado, solução, recomendação e observações pela tela
+  **Diagnóstico e solução** (`/technician/jobs/:id/diagnostico`). A função
+  `registrar_atendimento_campo` só aceita esses campos e o gatilho da OS, avisado por ela,
+  libera apenas o registro do atendimento — um cargo de campo sem `service_orders.edit`
+  continua sem editar a OS pela tabela.
+- **Resumo antes de finalizar** (§40, componente `ResumoFinalizacao`): tempos de deslocamento e
+  atendimento, checklist, materiais, serviços, fotos, diagnóstico, solução, responsável e
+  assinatura, sem valores. Aparece no painel "Finalizar" da OS (que bloqueia o botão enquanto
+  falta algo) e na tela **Finalizar atendimento** do portal
+  (`/technician/jobs/:id/finalizar`), com atalhos para resolver cada pendência.
+- A linha do tempo mostra "finalizou o atendimento em campo e encerrou a OS" ou "concluiu a
+  visita sem encerrar a OS".
+
+### Relatório técnico (fase 3 · etapa 16)
+
+- **Estrutura única no banco** (`montar_relatorio_os`, interna): empresa, OS, cliente, endereço,
+  equipamento, técnico/equipe, problema, diagnóstico/causa/serviço/solução/recomendação,
+  checklist (só itens visíveis, com "fora da faixa"), materiais e serviços **sem valores**, fotos
+  (caminho, categoria, descrição, autor), horários por visita (saída, chegada, início, término),
+  tempos somados e assinatura (nome, documento, data, SHA-256 e imagem). O campo `estrutura`
+  versiona o formato — é a entrada pronta para um PDF gerado no servidor no futuro (§41).
+- **Congelado na finalização** (`os_relatorios`): `efetivar_status_os` grava uma versão sempre
+  que a OS vai para "finalizada", por qualquer caminho. Reabrir e finalizar de novo gera a
+  versão 2; a 1 continua lá. Editar a OS depois não muda a versão. Ninguém grava na tabela
+  direto (RLS só com leitura); cancelar não gera relatório.
+- **Leitura**: `relatorio_tecnico_os(os, versao?)` (Portal da Empresa, `service_orders.view`) e
+  `relatorio_tecnico_atendimento(agendamento)` (portal do técnico, só o próprio atendimento).
+  OS aberta → prévia com os dados atuais; OS finalizada → última versão. Telefone, documento e
+  e-mail do cliente só vão para quem tem `customers.view` (o endereço sempre vai).
+- **Telas**: botão **Relatório técnico** no detalhe da OS (`/app/service-orders/:id/report`),
+  com seletor de versões, e **Relatório do atendimento** no portal
+  (`/technician/jobs/:id/relatorio`). O documento é branco, em A4, e **Imprimir ou salvar PDF**
+  usa a impressão do navegador (o CSS de impressão esconde o resto da tela).
+- O PDF da OS e o recibo (com valores) continuam como estavam.
+
+### Notificações internas (fase 3 · etapa 17)
+
+- **In-app** (§43), na tabela `notificacoes`: cada usuário lê só as suas (RLS) e ninguém grava
+  direto — gerar e marcar como lida passam pelo banco.
+- **Geradas por um gatilho em `log_eventos`** (`trg_log_eventos_notificar`): os eventos que as
+  funções de agenda, campo e status já registram viram avisos, sem chamadas espalhadas pelo
+  código. Quem fez a ação não é avisado, e uma falha ao gerar aviso nunca derruba a operação
+  (vira só um *warning* no log do banco).
+- **Quem recebe**
+  - Dono e quem tem `dispatch.view`: técnico iniciou o atendimento, atendimento pausado (com o
+    motivo), OS finalizada e **OS urgente atrasada**.
+  - Técnico (e membros da equipe, quando o agendamento/OS é da equipe): nova OS atribuída, novo
+    atendimento agendado (com dia e hora), horário alterado, atendimento cancelado e OS
+    cancelada (com o motivo). Atribuir e agendar no mesmo passo gera **um** aviso só.
+- **OS urgente atrasada** não tem evento: `minhas_notificacoes` gera o aviso na primeira consulta
+  de qualquer pessoa da empresa depois que o prazo passa, uma vez por prazo (chave única).
+- Avisos com mais de 90 dias são descartados. Os horários nas mensagens usam o fuso de Brasília.
+- **Telas**: sino com contagem no topo do Portal da Empresa (painel com "Marcar todos como
+  lidos"; clicar abre a OS) e, no portal do técnico, sino no cabeçalho e a tela **Avisos**
+  (`/technician/notifications`; clicar abre o atendimento). A caixa é atualizada a cada minuto
+  com a aba visível e ao voltar para a aba.
+
+### PWA e modo offline do técnico (fase 3 · etapa 18)
+
+- **Instalável** (§44): `public/manifest-tecnico.webmanifest` ("Oxys Campo", início e escopo em
+  `/technician`), ícones em `public/icons` e `public/sw.js`. O manifest e o service worker só são
+  ligados dentro do portal do técnico (`usePwaTecnico`); `/app` e `/admin` não mudam. O service
+  worker (só no build de produção) guarda **apenas a casca** do app — `index.html` (rede primeiro)
+  e `/assets/*` com hash (cache primeiro, limitado) — e **nunca** respostas da API.
+- **Dados no aparelho** (§45, §50), só com a feature `offline_mode` do plano (o contexto do portal
+  traz `offline`): IndexedDB `oxys-campo` com cópias da agenda, dos atendimentos de hoje e dos
+  próximos dias (OS, cliente, endereço, equipamento), checklists e diagnóstico. Pré-carga ao abrir
+  e a cada 15 min com internet. As cópias são do usuário logado: trocar de usuário/empresa, sair
+  do app (qualquer portal) ou perder a feature apaga tudo; validade de 7 dias.
+- **Fila offline** (§46): sem internet, **checklist**, **fotos** (já reduzidas, guardadas no
+  aparelho) e **diagnóstico** continuam funcionando e aparecem na tela como feitos. Sobem sozinhos
+  quando a rede volta (evento `online`, reenvio a cada 30 s e botão "Sincronizar agora"), na ordem
+  em que foram feitos. Passos do atendimento, finalização, assinatura, materiais e horas usam o
+  relógio/validação do servidor na hora e mostram "Sem internet: … precisa de conexão".
+- **Conflitos** (§47): nada de "último vence". A resposta de checklist leva o `respondido_em` que o
+  técnico viu; o diagnóstico leva o valor visto de cada campo. Se o escritório mudou o mesmo dado,
+  a operação volta como **conflito** (o diagnóstico aplica os campos livres e devolve só os
+  conflitantes) e o técnico decide na tela **Sincronização** (`/technician/sync`): "Manter a do
+  servidor" ou "Usar a minha" (reenvia com a versão atual como base — decisão explícita).
+- **Idempotência** (§48): cada operação tem uma chave (`sync_operacoes`, por usuário): reenviar
+  depois de uma resposta perdida devolve o resultado guardado, sem aplicar de novo nem repetir
+  evento na linha do tempo. A foto usa o id gerado no aparelho (caminho e registro fixos): o
+  reenvio não duplica arquivo nem anexo. Finalizar/apontar continuam só online (transições do
+  servidor já barram a repetição).
+- **Indicador** (§49) abaixo do cabeçalho do portal: "Online"/"Offline" e "N alterações aguardando
+  sincronização" ou "N alterações precisam de atenção" (link para a tela de sincronização). Sair
+  com alterações não enviadas pede confirmação.
+- Funções `sincronizar_resposta_checklist` e `sincronizar_atendimento_campo` (exigem portal do
+  técnico e `offline_mode`, validam por dentro com as funções de sempre). A sincronização do
+  cliente foi testada no navegador contra um servidor simulado (21 cenários: queda de rede no
+  meio, resposta perdida, conflito, recusa, troca de usuário, sair, plano sem a feature).
+
+### Revisão de segurança (fase 3 · etapa 19)
+
+- **Escopo do técnico** (§55, migrations `fase3_32` e `fase3_34`): o cargo Técnico tinha
+  `service_orders.view` e, trocando o id na URL, lia (e com `service_orders.edit`, alterava) qualquer
+  OS da empresa. Agora quem está vinculado a um técnico e **não** tem a nova permissão
+  `service_orders.view_all` só enxerga as OS **atribuídas a ele**, **à equipe dele** ou **com visita
+  marcada para ele/equipe**. A regra mora em `os_no_meu_escopo_id` e vale na RLS (`ordens_servico`,
+  `agendamentos`, apontamentos, assinaturas, relatórios, anexos, jornada/indisponibilidade), nas
+  funções por id (OS de fora → "Ordem de serviço não encontrada."), nas listas e agregados (lista de
+  OS, agenda, dashboard, relatórios, históricos de cliente/equipamento), no Storage e na sincronização
+  offline. Central de despacho e verificação de conflitos (que mostram a agenda de todos) são negadas
+  ao técnico restrito — para agendar, dê `service_orders.view_all` ao cargo.
+- `service_orders.view_all` foi dada a todos os cargos que já viam OS, **menos o Técnico**, e entra no
+  seed de empresas novas (Gerente, Atendente, Financeiro). Owner e quem não é técnico não mudam; um
+  "supervisor de campo" é um cargo personalizado com a permissão.
+- **anon** (`fase3_33`): perdeu todo privilégio no schema `public` (tabelas, sequências, funções),
+  inclusive nos objetos criados daqui em diante. Antes a RLS barrava; agora nem o grant existe.
+- **Edge functions de admin** (`criar-loja-gerente`, `criar-gerente`, `atualizar-gerente`): o fonte
+  agora está em `supabase/functions/` e a checagem usa `is_super_admin()` (papel **e** `ativo`) —
+  super admin desativado com token ainda válido é barrado (as três publicadas em 2026-09-28). `criar-funcionario`/`atualizar-funcionario` já validavam `team.manage`,
+  empresa e o dono.
+- Conferido: service role só nas edge functions; `.env` fora do git; `usuarios` sem política de
+  escrita (papel não se autopromove); toda tabela com RLS.
+- Teste consolidado `supabase/tests/fase3_17_seguranca.sql` (19 cenários do §68 e do §55: técnico A →
+  OS da empresa B, owner A → agenda da B, técnico trocando a empresa da OS, técnico → função de owner,
+  plano sem dispatch, empresa suspensa, escopo por tabela/função/lista/agenda/dashboard/Storage,
+  equipe e `view_all`).
+- **Pendências do dono do projeto**: ligar a proteção contra senhas vazadas no Supabase Auth
+  (Authentication → Providers → Email → *Leaked password protection*); o CPF do técnico continua
+  legível para quem tem `service_orders.view` (necessário no cadastro; avaliar mascarar).
+
+### Build final (fase 3 · etapa 20)
+
+- **Bateria completa reexecutada** depois das migrations de segurança: os 28 arquivos de
+  `supabase/tests` (fase 2 e fase 3) passam, todos com 0 falhas, e nenhum dado de teste fica no
+  banco. O `fase3_11` localizava um item pela posição na lista; como os itens do teste nascem na
+  mesma transação (mesmo `criado_em`), o desempate era aleatório — passou a localizar pelo nome.
+- **Código dividido por página** no Portal da Empresa (`React.lazy` em cada rota, com carregamento
+  dentro do layout): a casca do portal caiu de 915 kB para 35 kB e o build não emite mais o aviso
+  de pacote acima de 500 kB. O portal do técnico continua em um pacote só (~97 kB), o que ajuda o
+  modo offline.
+- Conferência no build de produção (`vite preview`): login, redirecionamento das rotas protegidas,
+  arquivos do PWA (`sw.js`, manifest com escopo `/technician`, ícones) servidos e console sem erros.
+- `typecheck` e `build` limpos; advisors sem apontamento novo (seguem os conhecidos: tabelas com RLS
+  e sem política de propósito, funções `SECURITY DEFINER` chamáveis por autenticados — validam por
+  dentro — e a proteção contra senhas vazadas, que depende do plano do Supabase).
+
 ## Código compartilhado (`@oxys/shared`)
 
 | Import                                 | Conteúdo                                          |
@@ -186,8 +544,100 @@ Revisão de ponta a ponta ao fechar a fase, com a bateria de testes inteira reex
 - Listagem paginada com busca, filtro por especialidade e contadores reais de OS em
   andamento/pausadas e concluídas (`listar_tecnicos`).
 - Permissões `technicians.view` / `technicians.manage`; quem vê OS lê os nomes dos técnicos.
-- Preparação futura: foto, região de atendimento, horário, comissão, localização e estoque
-  próprio serão tabelas próprias ligadas a `tecnicos(loja_id, id)`.
+- Preparação futura: foto, região de atendimento, comissão, localização e estoque próprio
+  serão tabelas próprias ligadas a `tecnicos(loja_id, id)`.
+
+### Equipes e disponibilidade (fase 3 · etapa 3)
+
+- **Equipes** (`equipes` + `equipe_membros`) agrupam técnicos ativos da mesma empresa, com
+  cor para a agenda e um líder opcional. Uma OS pode ir para um técnico, para uma equipe
+  (`ordens_servico.equipe_id`) ou para os dois; atribuir ou trocar a equipe entra na linha
+  do tempo (`os_equipe_atribuida` / `os_equipe_removida`).
+- Equipe com OS em aberto não é desativada, equipe já usada em OS não é excluída (só
+  desativada) e equipe inativa não recebe OS — mesma regra já aplicada a cliente,
+  equipamento e técnico.
+- **Jornada semanal** (`tecnico_jornada`): turnos por dia da semana, vários por dia, sem
+  sobreposição (gatilho). Sem jornada cadastrada o técnico é tratado como disponível.
+- **Ausências** (`tecnico_indisponibilidade`): folga, férias, atestado, treinamento,
+  bloqueio ou outro. O banco recusa períodos sobrepostos do mesmo técnico por uma
+  constraint de exclusão (`gist`, com `btree_gist`).
+- `tecnico_disponivel_em(tecnico, inicio, fim, fuso)` é a base dos conflitos do
+  agendamento: confere técnico ativo, ausências e se um turno cobre o intervalo inteiro.
+- Escrita só pelas funções de servidor (`salvar_equipe`, `definir_equipe_ativa`,
+  `excluir_equipe`, `salvar_jornada_tecnico`, `registrar_indisponibilidade`,
+  `remover_indisponibilidade`), todas exigindo `technicians.manage`; leitura para quem tem
+  `technicians.view`. As tabelas têm RLS só de `select`.
+- Interface: botão **Equipes** e ação **Disponibilidade** em `/app/technicians`.
+- Catálogo de permissões ganhou agenda, despacho e ações de campo
+  (`calendar.*`, `dispatch.*`, `technician.jobs.*`, `checklists.fill`, `attachments.upload`,
+  `service_orders.add_material`, `service_orders.sign`), aplicadas aos cargos padrão das
+  empresas que já existem e ao seed das novas. As features `dispatch`,
+  `advanced_checklists`, `offline_mode` e `technician_portal` valem do plano Pro para cima.
+
+### Agenda (`/app/calendar`, fase 3 · etapa 4)
+
+- Tabela própria `agendamentos` (`os_id`, `tecnico_id`, `equipe_id`, `inicio_em`, `fim_em`,
+  `status`, `versao`): uma OS pode ter mais de uma visita, e o horário de campo passa a ser
+  independente de `ordens_servico.data_agendada/hora_agendada`, que seguem como a data
+  combinada com o cliente. As OS que já tinham data entraram na agenda pela migration.
+- `agenda_periodo(inicio, fim, tecnico, equipe, incluir_cancelados)` devolve os eventos do
+  intervalo com cliente, tipo de serviço, técnico, equipe, status e prioridade, mais as
+  listas de técnicos e equipes ativos (colunas das visões por responsável). A janela é
+  limitada a dois meses por consulta — a agenda pode ter milhares de registros e nunca é
+  carregada inteira. O nome do cliente só vem para quem tem `customers.view`.
+- Visões Dia, Semana, Mês, Técnicos e Equipes; a grade de horários posiciona o evento pelo
+  horário real e divide a largura entre atendimentos sobrepostos, com marcador da hora atual.
+  Filtros de técnico, equipe e cancelados ficam na URL.
+- As cores são as configuradas pela empresa: faixa lateral = prioridade, ponto = status da OS.
+  Nada de regra de cor fixa no componente.
+- Leitura exige feature `calendar` + permissão `calendar.view` (na RPC e na política de RLS);
+  a tabela não aceita escrita direta do cliente.
+
+### Agendamento e conflitos (fase 3 · etapa 5)
+
+- Escrita só pelas funções `agendar_os`, `reagendar_agendamento` e
+  `definir_status_agendamento` (`calendar.manage`). Elas conferem a OS (não agendam OS
+  finalizada), técnico/equipe ativos da empresa, duração de até 24 horas e sincronizam
+  `ordens_servico.data_agendada/hora_agendada` com o próximo atendimento ativo.
+- `conflitos_agendamento(tecnico, equipe, inicio, fim, ignorar, fuso)` devolve a lista com
+  mensagem pronta: **técnico ocupado**, **equipe ocupada**, **técnico ausente** (com o
+  motivo) e **fora da jornada**. O painel consulta enquanto o usuário preenche, e o banco
+  recalcula tudo de novo dentro da transação — a checagem do navegador nunca é a única.
+- Passar por cima de um conflito exige a permissão nova **`calendar.override`** (cargos
+  Proprietário e Gerente); sem ela, a operação é recusada mesmo com `p_forcar`. O evento
+  gravado marca `forcado`.
+- Concorrência (§60): `agendar_os` e `reagendar_agendamento` tomam `pg_advisory_xact_lock`
+  por técnico e por equipe antes de checar conflito, então duas pessoas agendando o mesmo
+  técnico ao mesmo tempo são serializadas. Reagendar também usa `versao` (conflito 40001).
+- Na agenda: botão **Agendar OS** (busca a OS em aberto), clique no evento abre o painel
+  (reagendar, confirmar com o cliente, cancelar com motivo), **arrastar e soltar** move o
+  atendimento na grade de Dia/Semana com confirmação ("passa para 19/09 às 12:00"), e dois
+  cliques num horário vazio abrem um agendamento já naquele horário.
+- Tudo entra na linha do tempo da OS: `os_agendada`, `os_reagendada` (de/para),
+  `os_agendamento_confirmado`, `os_agendamento_cancelado` e `os_agendamento_reaberto`,
+  além de `os_equipe_atribuida`/`os_equipe_removida`, que agora aparecem com nome e horário.
+
+### Central de Despacho (`/app/dispatch`, fase 3 · etapa 6)
+
+- Tela dividida: **OS não atribuídas** (em aberto, sem técnico e sem equipe) de um lado e os
+  **técnicos com a agenda do dia** do outro. A fila traz cliente, local, tipo de serviço,
+  prioridade, SLA (`situacao_sla_os`, a mesma regra da lista de OS) e há quanto tempo a OS
+  espera.
+- A **situação do técnico** sai de dados reais, nunca do frontend: `em_atendimento` (o
+  atendimento em campo está em curso), `ausente` (ausência registrada agora), `ocupado`
+  (agendamento cobrindo o instante), `fora_jornada` (tem jornada e o horário não está nela),
+  `offline` (técnico sem login vinculado ou inativo) e `disponivel` no resto. *Deslocamento*
+  e *pausa* entram quando o fluxo de campo existir (etapa 9).
+- **Sugestão de técnico** (`sugerir_tecnicos`) é determinística, sem IA: pontua
+  disponibilidade (sem conflito no horário, o que já considera jornada e ausência),
+  especialidade exigida pelo tipo de serviço e carga do dia, e devolve os motivos em texto.
+  Região ainda não entra — não existe região de atendimento cadastrada por técnico.
+- As especialidades exigidas por tipo de serviço ficam em `tipo_servico_especialidades` e são
+  configuradas em **Configurações › Tipos de serviço** (exige `settings.manage`).
+- Distribuir: arrastar a OS até o técnico abre o agendamento já com técnico e horário
+  sugerido; "Só atribuir" usa `atribuir_os`, que exige a feature `dispatch` e a permissão
+  `dispatch.assign` (ver a central pede só `dispatch.view`). Os eventos de atribuição saem
+  do gatilho da própria OS e aparecem na linha do tempo.
 
 ### Equipamentos (`/app/assets`, `/app/assets/:id`)
 

@@ -12,19 +12,24 @@ import {
   salvarModeloChecklist,
 } from "../ordens/execucaoService";
 import {
+  OPCOES_CONDICAO_CHECKBOX,
   ROTULO_TIPO_ITEM_CHECKLIST,
+  TIPOS_ITEM_AVANCADOS,
   TIPOS_ITEM_CHECKLIST,
+  TIPOS_ITEM_CONDICIONAVEIS,
   type DadosModeloForm,
   type ItemModeloForm,
   type ModeloChecklist,
   type TipoItemChecklist,
 } from "../ordens/tiposExecucao";
 import { listarTiposServico } from "./configuracaoOsService";
-import type { TipoServico } from "./tipos";
+import { SUGESTOES_CHECKLIST, type SugestaoChecklist, type TipoServico } from "./tipos";
 import { Selo } from "./components/Indicadores";
+import { useCompany } from "../context/CompanyContext";
 
 export function ChecklistsPage() {
   const { notificarSucesso, notificarErro } = useToast();
+  const { segment, hasFeature } = useCompany();
   const [modelos, setModelos] = useState<ModeloChecklist[] | null>(null);
   const [tipos, setTipos] = useState<TipoServico[]>([]);
   const [erroCarga, setErroCarga] = useState<string | null>(null);
@@ -64,6 +69,46 @@ export function ChecklistsPage() {
 
   const totalInativos = (modelos ?? []).filter((m) => !m.ativo).length;
 
+  // prontos do segmento da empresa que ela ainda não tem (§29 e §30)
+  const sugestoes = useMemo(() => {
+    if (!modelos) return [];
+    const slug = segment?.slug;
+    const existentes = new Set(modelos.map((m) => normalizarBusca(m.nome)));
+    return SUGESTOES_CHECKLIST.filter(
+      (s) =>
+        !existentes.has(normalizarBusca(s.nome)) &&
+        (s.segmentos.length === 0 || (slug ? s.segmentos.includes(slug) : false)) &&
+        (!s.avancado || hasFeature("advanced_checklists")),
+    );
+  }, [modelos, segment?.slug, hasFeature]);
+
+  function adicionarSugestao(sugestao: SugestaoChecklist) {
+    executar(
+      `sugestao:${sugestao.nome}`,
+      async () => {
+        await salvarModeloChecklist(null, null, {
+          nome: sugestao.nome,
+          descricao: "",
+          tipo_servico_id: "",
+          itens: sugestao.itens.map((i) => ({
+            chave: crypto.randomUUID(),
+            rotulo: i.rotulo,
+            tipo: i.tipo,
+            obrigatorio: !!i.obrigatorio,
+            opcoes: (i.opcoes ?? []).join("\n"),
+            ajuda: "",
+            unidade: i.unidade ?? "",
+            valor_min: i.valor_min ?? "",
+            valor_max: i.valor_max ?? "",
+            depende_de_ordem: "",
+            condicao_valor: "",
+          })),
+        });
+      },
+      `"${sugestao.nome}" criado. Ajuste os itens como quiser.`,
+    );
+  }
+
   async function executar(id: string, acao: () => Promise<void>, sucesso: string) {
     setProcessandoId(id);
     try {
@@ -83,9 +128,9 @@ export function ChecklistsPage() {
         <div className="max-w-2xl">
           <h2 className="font-display text-base font-semibold text-text-primary">Checklists</h2>
           <p className="mt-1 text-sm text-text-secondary">
-            Modelos de verificação aplicados nas OS: caixas de seleção, textos, números, fotos, listas de opções e datas.
-            Itens obrigatórios precisam ser respondidos antes de finalizar a OS. Alterar um modelo não muda checklists já
-            aplicados.
+            Modelos de verificação aplicados nas OS: caixas de seleção, texto, número, medição, foto, assinatura, lista
+            de opções, data e hora. Um item pode aparecer só conforme a resposta de outro. Itens obrigatórios visíveis
+            precisam ser respondidos antes de finalizar a OS. Alterar um modelo não muda checklists já aplicados.
           </p>
         </div>
         <button
@@ -115,6 +160,31 @@ export function ChecklistsPage() {
           </label>
         )}
       </div>
+
+      {sugestoes.length > 0 && (
+        <section aria-labelledby="sugestoes_checklist" className="rounded-xl border border-border bg-panel px-4 py-3">
+          <h3 id="sugestoes_checklist" className="text-xs font-medium uppercase tracking-wide text-text-muted">
+            Modelos prontos {segment ? `para ${segment.nome}` : ""} — clique para criar
+          </h3>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {sugestoes.map((sugestao) => {
+              const ocupado = processandoId === `sugestao:${sugestao.nome}`;
+              return (
+                <button
+                  key={sugestao.nome}
+                  onClick={() => adicionarSugestao(sugestao)}
+                  disabled={processandoId !== null}
+                  title={sugestao.itens.map((i) => i.rotulo).join(" · ")}
+                  className="flex items-center gap-1.5 rounded-full border border-dashed border-border-strong px-3 py-1 text-xs text-text-secondary hover:border-accent hover:text-text-primary disabled:opacity-50"
+                >
+                  {ocupado ? <Loader2 size={12} className="animate-spin" aria-hidden="true" /> : <Plus size={12} aria-hidden="true" />}
+                  {sugestao.nome} ({sugestao.itens.length})
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       {erroCarga ? (
         <div role="alert" className="flex flex-col items-start gap-3 rounded-xl border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-text-primary">
@@ -246,8 +316,34 @@ interface ModeloChecklistPanelProps {
 
 const LIMITE_ITENS = 100;
 
+const campoItem =
+  "rounded-lg border border-border bg-panel px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-accent";
+
+/** Respostas possíveis do item que governa a condição. */
+function opcoesDaCondicao(alvo: ItemModeloForm | undefined): { valor: string; rotulo: string }[] {
+  if (!alvo) return [];
+  if (alvo.tipo === "checkbox") return OPCOES_CONDICAO_CHECKBOX;
+  return alvo.opcoes
+    .split("\n")
+    .map((o) => o.trim())
+    .filter(Boolean)
+    .map((o) => ({ valor: o, rotulo: `for "${o}"` }));
+}
+
 function novoItem(tipo: TipoItemChecklist = "checkbox"): ItemModeloForm {
-  return { chave: crypto.randomUUID(), rotulo: "", tipo, obrigatorio: false, opcoes: "", ajuda: "" };
+  return {
+    chave: crypto.randomUUID(),
+    rotulo: "",
+    tipo,
+    obrigatorio: false,
+    opcoes: "",
+    ajuda: "",
+    unidade: "",
+    valor_min: "",
+    valor_max: "",
+    depende_de_ordem: "",
+    condicao_valor: "",
+  };
 }
 
 type ErrosModelo = { nome?: string; descricao?: string; itens?: string; porItem: Record<string, string> };
@@ -268,8 +364,28 @@ function validar(form: DadosModeloForm): ErrosModelo {
       if (opcoes.size < 2) erros.porItem[item.chave] = "Informe ao menos duas opções diferentes (uma por linha).";
       else if (opcoes.size > 30) erros.porItem[item.chave] = "Use até 30 opções.";
       else if ([...opcoes].some((o) => o.length > 100)) erros.porItem[item.chave] = "Cada opção deve ter até 100 caracteres.";
+    } else if (item.tipo === "medicao") {
+      const min = item.valor_min.trim() === "" ? null : Number(item.valor_min.replace(",", "."));
+      const max = item.valor_max.trim() === "" ? null : Number(item.valor_max.replace(",", "."));
+      if (item.unidade.trim().length > 12) erros.porItem[item.chave] = "A unidade deve ter até 12 caracteres.";
+      else if ((min !== null && !Number.isFinite(min)) || (max !== null && !Number.isFinite(max)))
+        erros.porItem[item.chave] = "A faixa esperada precisa ser numérica.";
+      else if (min !== null && max !== null && max < min)
+        erros.porItem[item.chave] = "O máximo da faixa precisa ser maior que o mínimo.";
     }
   }
+  // a condição só aponta para uma caixa de seleção ou lista acima do item
+  form.itens.forEach((item, i) => {
+    if (!item.depende_de_ordem) return;
+    const alvo = form.itens[Number(item.depende_de_ordem) - 1];
+    if (!alvo || Number(item.depende_de_ordem) > i) {
+      erros.porItem[item.chave] = "Escolha um item acima deste para a condição.";
+    } else if (!TIPOS_ITEM_CONDICIONAVEIS.includes(alvo.tipo)) {
+      erros.porItem[item.chave] = "A condição só funciona sobre caixa de seleção ou lista de opções.";
+    } else if (!item.condicao_valor) {
+      erros.porItem[item.chave] = "Escolha a resposta que faz este item aparecer.";
+    }
+  });
   return erros;
 }
 
@@ -279,6 +395,8 @@ function temErros(e: ErrosModelo): boolean {
 
 function ModeloChecklistPanel({ aberto, modelo, copia, tipos, onFechar, onSalvo }: ModeloChecklistPanelProps) {
   const { notificarSucesso, notificarErro } = useToast();
+  const { hasFeature } = useCompany();
+  const avancado = hasFeature("advanced_checklists");
   const [form, setForm] = useState<DadosModeloForm>({ nome: "", descricao: "", tipo_servico_id: "", itens: [] });
   const [erros, setErros] = useState<ErrosModelo>({ porItem: {} });
   const [salvando, setSalvando] = useState(false);
@@ -299,6 +417,11 @@ function ModeloChecklistPanel({ aberto, modelo, copia, tipos, onFechar, onSalvo 
               obrigatorio: i.obrigatorio,
               opcoes: i.opcoes.join("\n"),
               ajuda: i.ajuda ?? "",
+              unidade: i.unidade ?? "",
+              valor_min: i.valor_min == null ? "" : String(i.valor_min),
+              valor_max: i.valor_max == null ? "" : String(i.valor_max),
+              depende_de_ordem: i.depende_de_ordem == null ? "" : String(i.depende_de_ordem),
+              condicao_valor: i.condicao_valor ?? "",
             })),
           }
         : { nome: "", descricao: "", tipo_servico_id: "", itens: [novoItem()] },
@@ -425,7 +548,7 @@ function ModeloChecklistPanel({ aberto, modelo, copia, tipos, onFechar, onSalvo 
                           onChange={(e) => alterarItem(item.chave, { tipo: e.target.value as TipoItemChecklist })}
                           className="rounded-lg border border-border bg-panel px-3 py-2 text-sm text-text-primary focus:border-accent sm:w-44"
                         >
-                          {TIPOS_ITEM_CHECKLIST.map((t) => (
+                          {TIPOS_ITEM_CHECKLIST.filter((t) => avancado || !t.avancado || t.valor === item.tipo).map((t) => (
                             <option key={t.valor} value={t.valor}>
                               {t.rotulo}
                             </option>
@@ -441,6 +564,71 @@ function ModeloChecklistPanel({ aberto, modelo, copia, tipos, onFechar, onSalvo 
                           onChange={(e) => alterarItem(item.chave, { opcoes: e.target.value })}
                           className="rounded-lg border border-border bg-panel px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-accent"
                         />
+                      )}
+                      {item.tipo === "medicao" && (
+                        <div className="grid grid-cols-3 gap-2">
+                          <input
+                            value={item.unidade}
+                            maxLength={12}
+                            placeholder="Unidade (V)"
+                            aria-label={`Unidade da medição do item ${i + 1}`}
+                            onChange={(e) => alterarItem(item.chave, { unidade: e.target.value })}
+                            className={campoItem}
+                          />
+                          <input
+                            value={item.valor_min}
+                            inputMode="decimal"
+                            placeholder="Mínimo"
+                            aria-label={`Mínimo esperado do item ${i + 1}`}
+                            onChange={(e) => alterarItem(item.chave, { valor_min: e.target.value })}
+                            className={campoItem}
+                          />
+                          <input
+                            value={item.valor_max}
+                            inputMode="decimal"
+                            placeholder="Máximo"
+                            aria-label={`Máximo esperado do item ${i + 1}`}
+                            onChange={(e) => alterarItem(item.chave, { valor_max: e.target.value })}
+                            className={campoItem}
+                          />
+                        </div>
+                      )}
+                      {avancado && i > 0 && (
+                        <div className="flex flex-col gap-2 rounded-lg border border-dashed border-border px-3 py-2 sm:flex-row sm:items-center">
+                          <span className="shrink-0 text-xs text-text-muted">Mostrar só quando</span>
+                          <select
+                            value={item.depende_de_ordem}
+                            aria-label={`Item que libera o item ${i + 1}`}
+                            onChange={(e) =>
+                              alterarItem(item.chave, { depende_de_ordem: e.target.value, condicao_valor: "" })
+                            }
+                            className={`${campoItem} min-w-0 flex-1`}
+                          >
+                            <option value="">sempre aparecer</option>
+                            {form.itens.slice(0, i).map((anterior, j) =>
+                              TIPOS_ITEM_CONDICIONAVEIS.includes(anterior.tipo) ? (
+                                <option key={anterior.chave} value={String(j + 1)}>
+                                  {j + 1}. {anterior.rotulo.trim() || "(sem nome)"}
+                                </option>
+                              ) : null,
+                            )}
+                          </select>
+                          {item.depende_de_ordem && (
+                            <select
+                              value={item.condicao_valor}
+                              aria-label={`Resposta que libera o item ${i + 1}`}
+                              onChange={(e) => alterarItem(item.chave, { condicao_valor: e.target.value })}
+                              className={`${campoItem} min-w-0 flex-1`}
+                            >
+                              <option value="">escolha a resposta</option>
+                              {opcoesDaCondicao(form.itens[Number(item.depende_de_ordem) - 1]).map((o) => (
+                                <option key={o.valor} value={o.valor}>
+                                  {o.rotulo}
+                                </option>
+                              ))}
+                            </select>
+                          )}
+                        </div>
                       )}
                       <input
                         value={item.ajuda}
@@ -505,7 +693,15 @@ function ModeloChecklistPanel({ aberto, modelo, copia, tipos, onFechar, onSalvo 
             <Plus size={15} aria-hidden="true" /> Adicionar item
           </button>
           <p className="text-xs text-text-muted">
-            Tipos: {TIPOS_ITEM_CHECKLIST.map((t) => ROTULO_TIPO_ITEM_CHECKLIST[t.valor]).join(", ")}.
+            Tipos: {TIPOS_ITEM_CHECKLIST.filter((t) => avancado || !t.avancado).map((t) => ROTULO_TIPO_ITEM_CHECKLIST[t.valor]).join(", ")}.
+            {!avancado && (
+              <>
+                {" "}
+                Medição, assinatura, hora e itens condicionais fazem parte dos checklists avançados (
+                {TIPOS_ITEM_AVANCADOS.map((t) => ROTULO_TIPO_ITEM_CHECKLIST[t]).join(", ")}), disponíveis a partir do
+                plano Pro.
+              </>
+            )}
           </p>
         </fieldset>
 

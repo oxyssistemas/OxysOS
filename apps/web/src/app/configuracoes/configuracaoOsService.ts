@@ -32,7 +32,8 @@ function erro(error: PostgrestError, padrao: string): Error {
 
 const CAMPOS_STATUS = "id, chave, nome, categoria, cor, ordem, ativo, inicial";
 const CAMPOS_PRIORIDADE = "id, chave, nome, nivel, cor, ordem, padrao, ativo, sla_horas";
-const CAMPOS_TIPO = "id, nome, descricao, local_atendimento_padrao, ativo";
+const CAMPOS_TIPO =
+  "id, nome, descricao, local_atendimento_padrao, ativo, exige_diagnostico, exige_assinatura, exige_materiais, fotos_minimas";
 
 export async function obterUsoConfiguracaoOS(): Promise<UsoConfiguracaoOS> {
   const { data, error } = await supabase.rpc("uso_configuracao_os");
@@ -151,12 +152,22 @@ function normalizarTipo(dados: DadosTipoServicoForm) {
     nome: dados.nome,
     descricao: dados.descricao.trim() || null,
     local_atendimento_padrao: dados.local_atendimento_padrao || null,
+    exige_diagnostico: dados.exige_diagnostico,
+    exige_assinatura: dados.exige_assinatura,
+    exige_materiais: dados.exige_materiais,
+    fotos_minimas: dados.fotos_minimas,
   };
 }
 
-export async function criarTipoServico(lojaId: string, dados: DadosTipoServicoForm): Promise<void> {
-  const { error } = await supabase.from("tipos_servico").insert({ loja_id: lojaId, ...normalizarTipo(dados) });
+/** Devolve o id para que as especialidades exigidas possam ser salvas em seguida. */
+export async function criarTipoServico(lojaId: string, dados: DadosTipoServicoForm): Promise<string> {
+  const { data, error } = await supabase
+    .from("tipos_servico")
+    .insert({ loja_id: lojaId, ...normalizarTipo(dados) })
+    .select("id")
+    .single();
   if (error) throw erro(error, "Não foi possível criar o tipo de serviço.");
+  return (data as { id: string }).id;
 }
 
 export async function atualizarTipoServico(id: string, dados: DadosTipoServicoForm): Promise<void> {
@@ -177,5 +188,48 @@ export async function excluirTipoServico(id: string): Promise<void> {
       throw new Error("Este tipo já foi usado em ordens de serviço. Desative-o em vez de excluir.");
     }
     throw erro(error, "Não foi possível excluir o tipo de serviço.");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Especialidades exigidas pelo tipo de serviço (base da sugestão do despacho)
+// ---------------------------------------------------------------------------
+
+export async function listarEspecialidadesDosTipos(): Promise<Map<string, string[]>> {
+  const { data, error } = await supabase
+    .from("tipo_servico_especialidades")
+    .select("tipo_servico_id, especialidade_id");
+  if (error) throw erro(error, "Não foi possível carregar as especialidades dos tipos.");
+  const mapa = new Map<string, string[]>();
+  for (const linha of (data ?? []) as { tipo_servico_id: string; especialidade_id: string }[]) {
+    const atual = mapa.get(linha.tipo_servico_id);
+    if (atual) atual.push(linha.especialidade_id);
+    else mapa.set(linha.tipo_servico_id, [linha.especialidade_id]);
+  }
+  return mapa;
+}
+
+export async function definirEspecialidadesDoTipo(
+  lojaId: string,
+  tipoId: string,
+  especialidades: string[],
+  anteriores: string[],
+): Promise<void> {
+  const remover = anteriores.filter((id) => !especialidades.includes(id));
+  const incluir = especialidades.filter((id) => !anteriores.includes(id));
+
+  if (remover.length > 0) {
+    const { error } = await supabase
+      .from("tipo_servico_especialidades")
+      .delete()
+      .eq("tipo_servico_id", tipoId)
+      .in("especialidade_id", remover);
+    if (error) throw erro(error, "Não foi possível atualizar as especialidades do tipo.");
+  }
+  if (incluir.length > 0) {
+    const { error } = await supabase
+      .from("tipo_servico_especialidades")
+      .insert(incluir.map((id) => ({ loja_id: lojaId, tipo_servico_id: tipoId, especialidade_id: id })));
+    if (error) throw erro(error, "Não foi possível atualizar as especialidades do tipo.");
   }
 }

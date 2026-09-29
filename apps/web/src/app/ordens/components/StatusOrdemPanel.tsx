@@ -7,7 +7,10 @@ import { useCompany } from "../../context/CompanyContext";
 import { ROTULO_CATEGORIA_STATUS, type StatusOSConfig } from "../../configuracoes/tipos";
 import { MarcadorCor } from "../../configuracoes/components/Indicadores";
 import { alterarStatus } from "../ordensService";
+import { obterFinalizacaoOs } from "../execucaoService";
 import type { OrdemDetalhe } from "../tipos";
+import type { ResumoFinalizacao as Resumo } from "../tiposExecucao";
+import { ResumoFinalizacao } from "./ResumoFinalizacao";
 
 export type ModoStatus = "alterar" | "finalizar" | "cancelar";
 
@@ -32,6 +35,8 @@ export function StatusOrdemPanel({ modo, ordem, status, onFechar, onConcluido }:
   const [observacao, setObservacao] = useState("");
   const [erro, setErro] = useState<string | null>(null);
   const [salvando, setSalvando] = useState(false);
+  const [resumo, setResumo] = useState<Resumo | null>(null);
+  const [erroResumo, setErroResumo] = useState<string | null>(null);
 
   const opcoes = useMemo(() => {
     const ativos = status.filter((s) => s.ativo && s.id !== ordem.status_id);
@@ -48,6 +53,9 @@ export function StatusOrdemPanel({ modo, ordem, status, onFechar, onConcluido }:
 
   const escolhido = opcoes.find((s) => s.id === statusId);
   const exigeMotivo = escolhido?.categoria === "finalizado_cancelado";
+  const finalizando = escolhido?.categoria === "finalizado_sucesso";
+  // o banco recusa de novo; aqui só evita o clique que já sabemos que vai falhar
+  const bloqueadoPorRequisitos = finalizando && (resumo?.pendentes ?? 0) > 0;
 
   useEffect(() => {
     if (!modo) return;
@@ -55,6 +63,16 @@ export function StatusOrdemPanel({ modo, ordem, status, onFechar, onConcluido }:
     setErro(null);
     const preferida = modo === "finalizar" ? "finalizada" : modo === "cancelar" ? "cancelada" : null;
     setStatusId((opcoes.find((s) => s.chave === preferida) ?? (modo !== "alterar" ? opcoes[0] : undefined))?.id ?? "");
+    setResumo(null);
+    setErroResumo(null);
+    if (modo === "cancelar") return;
+    let ativo = true;
+    obterFinalizacaoOs(ordem.id)
+      .then((r) => ativo && setResumo(r))
+      .catch((e) => ativo && setErroResumo(e instanceof Error ? e.message : "Não foi possível carregar o resumo."));
+    return () => {
+      ativo = false;
+    };
   }, [modo]);
 
   async function salvar(e: FormEvent) {
@@ -66,6 +84,10 @@ export function StatusOrdemPanel({ modo, ordem, status, onFechar, onConcluido }:
     }
     if (exigeMotivo && !observacao.trim()) {
       setErro("Informe o motivo do cancelamento.");
+      return;
+    }
+    if (bloqueadoPorRequisitos) {
+      setErro("Conclua os itens pendentes antes de finalizar.");
       return;
     }
     if (observacao.trim().length > 500) {
@@ -96,13 +118,19 @@ export function StatusOrdemPanel({ modo, ordem, status, onFechar, onConcluido }:
       onFechar={() => !salvando && onFechar()}
       titulo={modo ? TITULOS[modo] : ""}
       subtitulo={`${ordem.numero} · status atual: ${ordem.status.nome}`}
+      largo={finalizando}
     >
       <form onSubmit={salvar} noValidate className="flex flex-col gap-5">
-        {modo === "finalizar" && !ordem.servico_executado && (
-          <p className="rounded-lg border border-border bg-white/[0.03] px-3 py-2 text-xs text-text-secondary">
-            O campo "Serviço executado" ainda está vazio. Você pode registrá-lo na aba Atendimento antes ou depois de finalizar.
-          </p>
-        )}
+        {finalizando &&
+          (resumo ? (
+            <ResumoFinalizacao resumo={resumo} />
+          ) : erroResumo ? (
+            <p role="alert" className="text-sm text-danger">{erroResumo}</p>
+          ) : (
+            <p className="flex items-center gap-2 text-sm text-text-muted">
+              <Loader2 size={14} className="animate-spin" aria-hidden="true" /> Conferindo os requisitos…
+            </p>
+          ))}
 
         {opcoes.length === 0 ? (
           <p className="text-sm text-text-secondary">Não há status disponíveis para esta ação com o seu cargo.</p>
@@ -160,13 +188,13 @@ export function StatusOrdemPanel({ modo, ordem, status, onFechar, onConcluido }:
           </button>
           <button
             type="submit"
-            disabled={salvando || opcoes.length === 0}
+            disabled={salvando || opcoes.length === 0 || bloqueadoPorRequisitos}
             className={`flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium text-white disabled:opacity-60 ${
               modo === "cancelar" ? "bg-danger hover:bg-danger/90" : "bg-accent hover:bg-accent-hover"
             }`}
           >
             {salvando && <Loader2 size={16} className="animate-spin" aria-hidden="true" />}
-            {modo === "finalizar" ? "Finalizar OS" : modo === "cancelar" ? "Cancelar OS" : "Alterar status"}
+            {finalizando ? "Confirmar finalização" : modo === "cancelar" ? "Cancelar OS" : "Alterar status"}
           </button>
         </div>
       </form>

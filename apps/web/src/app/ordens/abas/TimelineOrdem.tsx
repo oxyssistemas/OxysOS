@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import {
+  CalendarCheck,
+  CalendarClock,
+  CalendarX,
   CheckCircle2,
   ClipboardCheck,
   ClipboardList,
@@ -9,14 +12,19 @@ import {
   Loader2,
   MapPin,
   MessageSquare,
+  Navigation,
   Package,
   Paperclip,
   Pencil,
+  PauseCircle,
+  PenLine,
   PlayCircle,
   RefreshCcw,
   Send,
   Tags,
+  Timer,
   UserCog,
+  Users,
   type LucideIcon,
 } from "lucide-react";
 import { useToast } from "@oxys/shared/components/Toast";
@@ -25,7 +33,15 @@ import { ROTULO_LOCAL_ATENDIMENTO } from "../../legado/components/LocalAtendimen
 import type { LocalAtendimento } from "../../legado/types";
 import { adicionarComentario, obterTimeline } from "../execucaoService";
 import { formatarDataHora, formatarMoeda } from "../tipos";
-import { ROTULO_CAMPO_OS, type EventoTimeline } from "../tiposExecucao";
+import {
+  ROTULO_CAMPO_OS,
+  ROTULO_MOTIVO_PAUSA,
+  ROTULO_TIPO_APONTAMENTO,
+  duracaoEmHoras,
+  type EventoTimeline,
+  type MotivoPausaOS,
+  type TipoApontamento,
+} from "../tiposExecucao";
 
 interface TimelineOrdemProps {
   osId: string;
@@ -34,12 +50,22 @@ interface TimelineOrdemProps {
   chave: string;
 }
 
-type Filtro = "todos" | "comentarios" | "status" | "arquivos" | "checklist";
+type Filtro = "todos" | "comentarios" | "status" | "campo" | "arquivos" | "checklist";
+
+const EVENTOS_CAMPO = [
+  "os_deslocamento_iniciado",
+  "os_tecnico_chegou",
+  "os_atendimento_iniciado",
+  "os_atendimento_pausado",
+  "os_atendimento_retomado",
+  "os_atendimento_finalizado",
+];
 
 const FILTROS: { id: Filtro; rotulo: string }[] = [
   { id: "todos", rotulo: "Tudo" },
   { id: "comentarios", rotulo: "Comentários" },
   { id: "status", rotulo: "Status" },
+  { id: "campo", rotulo: "Campo e horas" },
   { id: "arquivos", rotulo: "Arquivos" },
   { id: "checklist", rotulo: "Checklist" },
 ];
@@ -55,6 +81,8 @@ function pertence(ev: EventoTimeline, filtro: Filtro): boolean {
       return ev.acao === "os_comentario";
     case "status":
       return ["os_criada", "os_status_alterado", "os_reparo_iniciado", "os_concluida"].includes(ev.acao);
+    case "campo":
+      return EVENTOS_CAMPO.includes(ev.acao) || ev.acao.startsWith("os_hora_");
     case "arquivos":
       return ev.acao.startsWith("os_anexo_");
     case "checklist":
@@ -66,6 +94,25 @@ const D = ({ children }: { children: ReactNode }) => <span className="font-mediu
 
 function rotuloLocal(valor: string | undefined): string {
   return valor && valor in ROTULO_LOCAL_ATENDIMENTO ? ROTULO_LOCAL_ATENDIMENTO[valor as LocalAtendimento] : (valor ?? "—");
+}
+
+/** "19/09 das 09:00 às 10:30" a partir dos ISO gravados no evento. */
+function quando(inicio: string | undefined, fim?: string): string {
+  if (!inicio) return "—";
+  const i = new Date(inicio);
+  const dia = i.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+  const hora = (d: Date) => d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  return fim ? `${dia} das ${hora(i)} às ${hora(new Date(fim))}` : `${dia} às ${hora(i)}`;
+}
+
+function rotuloMotivo(valor: string | undefined): string {
+  return valor && valor in ROTULO_MOTIVO_PAUSA ? ROTULO_MOTIVO_PAUSA[valor as MotivoPausaOS] : (valor ?? "—");
+}
+
+function rotuloApontamento(valor: string | undefined): string {
+  return valor && valor in ROTULO_TIPO_APONTAMENTO
+    ? ROTULO_TIPO_APONTAMENTO[valor as TipoApontamento].toLowerCase()
+    : "o tempo";
 }
 
 function listaCampos(campos: string[] | undefined): string {
@@ -137,6 +184,56 @@ function descrever(ev: EventoTimeline): { icone: LucideIcon; texto: ReactNode; d
           </>
         ),
       };
+    case "os_equipe_atribuida":
+      return {
+        icone: Users,
+        texto: (
+          <>
+            atribuiu a equipe <D>{d.equipe ?? "—"}</D>
+          </>
+        ),
+      };
+    case "os_equipe_removida":
+      return {
+        icone: Users,
+        texto: (
+          <>
+            removeu a equipe{d.equipe && <> <D>{d.equipe}</D></>}
+          </>
+        ),
+      };
+    case "os_agendada":
+      return {
+        icone: CalendarClock,
+        texto: (
+          <>
+            agendou o atendimento para <D>{quando(d.inicio, d.fim)}</D>
+            {d.tecnico && <> com <D>{d.tecnico}</D></>}
+            {d.equipe && <> com a equipe <D>{d.equipe}</D></>}
+          </>
+        ),
+        detalhe: d.forcado ? "Agendado mesmo havendo conflito." : undefined,
+      };
+    case "os_reagendada":
+      return {
+        icone: CalendarClock,
+        texto: (
+          <>
+            reagendou{d.de_inicio && <> de <D>{quando(d.de_inicio)}</D></>} para <D>{quando(d.inicio, d.fim)}</D>
+          </>
+        ),
+        detalhe: d.forcado ? "Reagendado mesmo havendo conflito." : undefined,
+      };
+    case "os_agendamento_confirmado":
+      return { icone: CalendarCheck, texto: "confirmou o atendimento com o cliente" };
+    case "os_agendamento_cancelado":
+      return {
+        icone: CalendarX,
+        texto: "cancelou o atendimento agendado",
+        detalhe: d.observacao ? `“${d.observacao}”` : undefined,
+      };
+    case "os_agendamento_reaberto":
+      return { icone: CalendarClock, texto: "devolveu o atendimento para a agenda" };
     case "os_tecnico_removido":
       return {
         icone: UserCog,
@@ -202,6 +299,66 @@ function descrever(ev: EventoTimeline): { icone: LucideIcon; texto: ReactNode; d
             removeu o checklist <D>{d.checklist ?? "—"}</D>
           </>
         ),
+      };
+    case "os_deslocamento_iniciado":
+      return { icone: Navigation, texto: "saiu para o atendimento" };
+    case "os_tecnico_chegou":
+      return { icone: MapPin, texto: "chegou ao local" };
+    case "os_atendimento_iniciado":
+      return { icone: PlayCircle, texto: "iniciou o atendimento em campo" };
+    case "os_atendimento_pausado":
+      return {
+        icone: PauseCircle,
+        texto: (
+          <>
+            pausou o atendimento{d.motivo && <> — <D>{rotuloMotivo(d.motivo)}</D></>}
+          </>
+        ),
+        detalhe: d.observacao ? `“${d.observacao}”` : undefined,
+      };
+    case "os_atendimento_retomado":
+      return { icone: PlayCircle, texto: "retomou o atendimento" };
+    case "os_atendimento_finalizado":
+      return {
+        icone: CheckCircle2,
+        texto: d.encerrou_os ? (
+          <>finalizou o atendimento em campo e encerrou a OS</>
+        ) : (
+          <>
+            concluiu a visita <D>sem encerrar a OS</D>
+          </>
+        ),
+        detalhe: d.observacao ? `“${d.observacao}”` : undefined,
+      };
+    case "os_hora_lancada":
+    case "os_hora_ajustada":
+    case "os_hora_removida": {
+      const verbo =
+        ev.acao === "os_hora_lancada" ? "lançou" : ev.acao === "os_hora_ajustada" ? "corrigiu" : "removeu";
+      return {
+        icone: Timer,
+        texto: (
+          <>
+            {verbo} {rotuloApontamento(d.tipo_apontamento)}
+            {d.duracao_min != null && <> de <D>{duracaoEmHoras(d.duracao_min)}</D></>}
+            {d.tecnico && <> de <D>{d.tecnico}</D></>}
+          </>
+        ),
+        detalhe: [quando(d.inicio, d.fim), d.observacao && `“${d.observacao}”`].filter(Boolean).join(" · "),
+      };
+    }
+    case "os_relatorio_gerado":
+      return { icone: ClipboardCheck, texto: "gerou o relatório técnico da finalização" };
+    case "os_assinatura_registrada":
+      return {
+        icone: PenLine,
+        texto: (
+          <>
+            colheu a assinatura de <D>{d.responsavel ?? "—"}</D>
+            {d.substituiu && <> (substituindo a anterior)</>}
+          </>
+        ),
+        detalhe: d.observacao ? `“${d.observacao}”` : undefined,
       };
     case "os_comentario":
       return { icone: MessageSquare, texto: "comentou", detalhe: d.texto };

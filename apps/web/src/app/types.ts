@@ -36,7 +36,24 @@ export type ChavePermissao =
   | "technicians.manage"
   | "team.manage"
   | "reports.view"
-  | "settings.manage";
+  | "settings.manage"
+  // fase 3 — agenda, despacho e portal do técnico
+  | "calendar.view"
+  | "calendar.manage"
+  | "calendar.override"
+  | "dispatch.view"
+  | "dispatch.assign"
+  | "technician.jobs.view"
+  | "technician.jobs.start"
+  | "technician.jobs.pause"
+  | "technician.jobs.complete"
+  | "checklists.fill"
+  | "attachments.upload"
+  | "service_orders.add_material"
+  | "service_orders.sign"
+  | "service_orders.manage_time"
+  // etapa 19 — sem ela, quem é técnico vê só as OS dele e da equipe
+  | "service_orders.view_all";
 
 /** Chaves de public.funcionalidades usadas pelo portal. */
 export type ChaveFeature =
@@ -48,7 +65,11 @@ export type ChaveFeature =
   | "inventory"
   | "finance"
   | "contracts"
-  | "advanced_reports";
+  | "advanced_reports"
+  | "dispatch"
+  | "technician_portal"
+  | "advanced_checklists"
+  | "offline_mode";
 
 export type ChaveCargoSistema = "owner" | "manager" | "attendant" | "technician" | "finance" | "inventory";
 
